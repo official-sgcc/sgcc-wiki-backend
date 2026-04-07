@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from sqlmodel import create_engine, Session, select, SQLModel
 from schemas.wiki_doc import WikiDoc, WikiDocCreate, WikiDocUpdate
+from schemas.wiki_user import WikiUser
 from schemas.permissions import Permissions
 from datetime import datetime
 
@@ -75,3 +76,25 @@ async def delete_document(title: str):
         session.delete(doc)
         session.commit()
         return {'message': f'The document named {title} has been deleted.'}
+    
+# Register user
+@app.post('/register')
+async def register_user(username: str, password: str):
+    with Session(engine) as session:
+        if session.get(WikiUser, username):
+            raise HTTPException(status_code=400, detail='Username already exists.')
+        
+        user = WikiUser(username=username, password=password, permission='login_user')
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        return {'message': f'User {username} has been registered successfully.'}
+    
+# Get user info
+@app.get('/users/{username}')
+async def get_user_info(username: str):
+    with Session(engine) as session:
+        user = session.get(WikiUser, username)
+        if not user:
+            raise HTTPException(status_code=404, detail='Cannot find user with the corresponding username.')
+        return user
