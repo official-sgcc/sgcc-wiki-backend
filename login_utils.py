@@ -1,4 +1,14 @@
 import bcrypt
+import jwt
+import os
+from dotenv import load_dotenv
+from datetime import datetime, timedelta, timezone
+
+load_dotenv()
+
+JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'testsecretkey')
+JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'HS256')
+JWT_TOKEN_EXPIRE_MINUTES = int(os.getenv('JWT_TOKEN_EXPIRE_MINUTES', 60))
 
 def hash_password(plain_password: str) -> str:
     plain_password_bytes = plain_password.encode('utf-8')
@@ -13,3 +23,8 @@ def verify_password(plain_password: str, encrypted_password: str):
     encrypted_password_bytes = encrypted_password.encode('utf-8')
 
     return bcrypt.checkpw(plain_password_bytes, encrypted_password_bytes)
+
+def create_jwt_token(username: str) -> str:
+    data = {'sub': username, 'exp': datetime.now(timezone.utc) + timedelta(minutes=JWT_TOKEN_EXPIRE_MINUTES)}
+
+    return jwt.encode(data, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
