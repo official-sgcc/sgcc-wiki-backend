@@ -3,7 +3,7 @@ from sqlmodel import create_engine, Session, select, SQLModel
 from schemas.wiki_doc import WikiDoc, WikiDocCreate, WikiDocUpdate
 from schemas.wiki_user import WikiUser
 from schemas.permissions import Permissions
-from datetime import datetime
+from datetime import datetime, timezone
 
 app = FastAPI()
 
@@ -30,7 +30,7 @@ async def create_document(doc_in: WikiDocCreate):
             raise HTTPException(status_code=400, detail='There is already a document with the same name.')
         
         doc = WikiDoc(**doc_in.model_dump())
-        doc.updated_at = datetime.now()
+        doc.updated_at = datetime.now(timezone.utc)
         
         session.add(doc)
         session.commit()
@@ -59,7 +59,7 @@ async def update_document(title: str, update_data: WikiDocUpdate):
         if update_data.tags is not None:
             doc.tags = update_data.tags
         
-        doc.updated_at = datetime.now()
+        doc.updated_at = datetime.now(timezone.utc)
         
         session.add(doc)
         session.commit()
