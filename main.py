@@ -1,6 +1,6 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, status, Header
 from sqlmodel import create_engine, Session, select, SQLModel
-from login_utils import hash_password, verify_password, create_jwt_token
+from login_utils import hash_password, verify_password, create_jwt_token, verify_jwt_token
 from schemas.wiki_doc import WikiDoc, WikiDocCreate, WikiDocUpdate
 from schemas.wiki_user import WikiUser
 from schemas.permissions import Permissions
@@ -10,6 +10,24 @@ app = FastAPI()
 
 engine = create_engine("sqlite:///wiki.db")
 SQLModel.metadata.create_all(engine)
+
+async def get_current_user(auth: str = Header(...)):
+    username = verify_jwt_token(auth)
+
+    with Session(engine) as session:
+        user = session.get(WikiUser, username)
+        if not user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+        return user
+
+# Check document specific permission
+def check_document_permission(session: Session, current_user: WikiUser, title: str, action: str):
+    permission = session.get(Permissions, title)
+    if not permission:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Document permissions not configured')
+    allowed = getattr(permission, action, None)
+    if not allowed or current_user.permission not in allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Requires document-specific '{action}' permission")
 
 # Get documents
 @app.get('/documents')
@@ -32,8 +50,16 @@ async def create_document(doc_in: WikiDocCreate):
         
         doc = WikiDoc(**doc_in.model_dump())
         doc.updated_at = datetime.now(timezone.utc)
-        
         session.add(doc)
+        
+        default_permissions = Permissions(
+            wiki_doc_title=doc.title,
+            update=['admin', 'club_member'],
+            move=['admin'],
+            delete=['admin'],
+            comment=['admin', 'club_member', 'login_user']
+        )
+        session.add(default_permissions)
         session.commit()
         session.refresh(doc)
         return doc
@@ -49,10 +75,12 @@ async def get_document(title: str):
 
 # Update document
 @app.put('/documents/{title}')
-async def update_document(title: str, update_data: WikiDocUpdate):
+async def update_document(title: str, update_data: WikiDocUpdate, current_user: WikiUser = Depends(get_current_user)):
     with Session(engine) as session:
         if not (doc := session.get(WikiDoc, title)):
             raise HTTPException(status_code=404, detail='Cannot find document to update')
+
+        check_document_permission(session, current_user, title, 'update')
 
         if update_data.content is not None:
             doc.content = update_data.content
@@ -67,12 +95,13 @@ async def update_document(title: str, update_data: WikiDocUpdate):
         session.refresh(doc)
         return doc
 
-# Delete document
 @app.delete('/documents/{title}')
-async def delete_document(title: str):
+async def delete_document(title: str, current_user: WikiUser = Depends(get_current_user)):
     with Session(engine) as session:
         if not (doc := session.get(WikiDoc, title)):
             raise HTTPException(status_code=404, detail='Cannot find document to delete')
+
+        check_document_permission(session, current_user, title, 'delete')
 
         session.delete(doc)
         session.commit()
