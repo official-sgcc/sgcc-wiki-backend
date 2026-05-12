@@ -3,7 +3,7 @@ import os
 from fastapi import FastAPI, HTTPException, Depends, status, Header
 from sqlmodel import create_engine, Session, select, SQLModel
 from login_utils import hash_password, verify_password, create_jwt_token, verify_jwt_token
-from schemas.wiki_doc import WikiDoc, WikiDocCreate, WikiDocUpdate
+from schemas.wiki_doc import WikiDoc, WikiDocCreate, WikiDocUpdate, WikiDocVersion
 from schemas.wiki_user import WikiUser, UserRegister
 from schemas.permissions import Permissions
 from schemas.tags import WikiTag, WikiTagCreate
