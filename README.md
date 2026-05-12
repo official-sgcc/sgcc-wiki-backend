@@ -46,6 +46,19 @@ Swagger UI: http://127.0.0.1:8000/docs
   - response:
     - 수정된 문서
 
+- `GET /documents/{title}/version` - 문서 버전 조회
+  - parameter:
+    - title - 문서 제목
+  - response:
+    - 문서 버전 리스트
+
+- `GET /search` - 문서 검색
+  - parameter:
+    - keyword - 검색어
+    - search_type - 검색 규칙(title, title_content, tag)
+  - response:
+    - 검색 결과 문서 리스트
+
 ### 사용자
 - `POST /register` - 회원가입
   - request body:
