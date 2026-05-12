@@ -1,3 +1,4 @@
+import shutil
 import os
 from fastapi import FastAPI, HTTPException, Depends, status, Header
 from sqlmodel import create_engine, Session, select, SQLModel
@@ -9,8 +10,27 @@ from schemas.tags import WikiTag, WikiTagCreate
 from datetime import datetime, timezone
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from apscheduler.schedulers.background import BackgroundScheduler
+from contextlib import asynccontextmanager
 
-app = FastAPI()
+BACKUP_DIR = './db_backups'
+os.makedirs(BACKUP_DIR, exist_ok=True)
+
+def backup_database():
+    today_str = datetime.now().strftime('%Y%m%d_%Hh%Mm%Ss')
+    backup_path = f'{BACKUP_DIR}/db_backup_{today_str}.db'
+
+    shutil.copy2('wiki.db', backup_path)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(backup_database, 'cron', hour=0, minute=0)
+    scheduler.start()
+    yield
+    scheduler.shutdown()
+
+app = FastAPI(lifespan=lifespan)
 
 load_dotenv()
 
@@ -24,7 +44,7 @@ app.add_middleware(
     allow_headers=['*']
 )
 
-engine = create_engine("sqlite:///wiki.db")
+engine = create_engine('sqlite:///wiki.db')
 SQLModel.metadata.create_all(engine)
 
 async def get_current_user(auth: str = Header(...)):
@@ -33,7 +53,7 @@ async def get_current_user(auth: str = Header(...)):
     with Session(engine) as session:
         user = session.get(WikiUser, username)
         if not user:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='User not found')
         return user
 
 # Check document specific permission
@@ -43,7 +63,7 @@ def check_document_permission(session: Session, current_user: WikiUser, title: s
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Document permissions not configured')
     allowed = getattr(permission, action, None)
     if not allowed or current_user.permission not in allowed:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Requires document-specific '{action}' permission")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f'Requires document-specific \'{action}\' permission')
 
 # Get documents
 @app.get('/documents')
