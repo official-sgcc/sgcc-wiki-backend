@@ -9,7 +9,7 @@ load_dotenv()
 
 JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'testsecretkey')
 JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'HS256')
-JWT_TOKEN_EXPIRE_MINUTES = int(os.getenv('JWT_TOKEN_EXPIRE_MINUTES', 60))
+JWT_TOKEN_EXPIRE_MINUTES = int(os.getenv('JWT_TOKEN_EXPIRE_MINUTES', 180))
 
 def hash_password(plain_password: str) -> str:
     plain_password_bytes = plain_password.encode('utf-8')
