@@ -92,7 +92,7 @@ async def create_document(doc_in: WikiDocCreate):
             wiki_doc_title=doc.title,
             version_number=1,
             content=doc.content,
-            tags=[{"name": tag.name} if hasattr(tag, 'name') else tag for tag in doc.tags],
+            tags=[{'name': tag.name} if hasattr(tag, 'name') else tag for tag in doc.tags],
             updated_at=doc.updated_at,
             updated_by='placeholder'
         )
