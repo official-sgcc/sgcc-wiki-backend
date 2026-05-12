@@ -1,4 +1,5 @@
-from sqlmodel import Relationship, SQLModel, Field, BaseModel
+from sqlmodel import Relationship, SQLModel, Field
+from pydantic import BaseModel
 from .permissions import Permissions
 
 class UserRegister(BaseModel):
