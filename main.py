@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI, HTTPException, Depends, status, Header
 from sqlmodel import create_engine, Session, select, SQLModel
 from login_utils import hash_password, verify_password, create_jwt_token, verify_jwt_token
@@ -6,8 +7,19 @@ from schemas.wiki_user import WikiUser
 from schemas.permissions import Permissions
 from schemas.tags import WikiTag, WikiTagCreate
 from datetime import datetime, timezone
+from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
 app = FastAPI()
+
+load_dotenv()
+
+FRONTEND_URL =  os.getenv('FRONTEND_URL')| 'http://localhost:5173'
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[FRONTEND_URL]
+)
 
 engine = create_engine("sqlite:///wiki.db")
 SQLModel.metadata.create_all(engine)
