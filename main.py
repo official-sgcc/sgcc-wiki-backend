@@ -2,7 +2,7 @@ import os
 from fastapi import FastAPI, HTTPException, Depends, status, Header
 from sqlmodel import create_engine, Session, select, SQLModel
 from login_utils import hash_password, verify_password, create_jwt_token, verify_jwt_token
-from schemas.wiki_doc import WikiDoc, WikiDocCreate, WikiDocUpdate
+from schemas.wiki_doc import WikiDoc, WikiDocCreate, WikiDocUpdate, WikiDocVersion
 from schemas.wiki_user import WikiUser
 from schemas.permissions import Permissions
 from schemas.tags import WikiTag, WikiTagCreate
@@ -66,11 +66,22 @@ async def create_document(doc_in: WikiDocCreate):
         
         doc = WikiDoc(**doc_in.model_dump())
         doc.updated_at = datetime.now(timezone.utc)
+
+        version = WikiDocVersion(
+            wiki_doc=doc,
+            wiki_doc_title=doc.title,
+            version_number=1,
+            content=doc.content,
+            tags=[{"name": tag.name} if hasattr(tag, 'name') else tag for tag in doc.tags],
+            updated_at=doc.updated_at,
+            updated_by='placeholder'
+        )
+        doc.versions.append(version)
+
         session.add(doc)
-        
         default_permissions = Permissions(
             wiki_doc_title=doc.title,
-            update=['admin', 'club_member'],
+            update=['admin', 'club_member', 'login_user'],
             move=['admin'],
             delete=['admin'],
             comment=['admin', 'club_member', 'login_user']
@@ -102,10 +113,21 @@ async def update_document(title: str, update_data: WikiDocUpdate, current_user: 
             doc.content = update_data.content
             
         if update_data.tags is not None:
-            doc.tags = update_data.tags
+            doc.tags = [tag.model_dump() if hasattr(tag, 'model_dump') else tag for tag in update_data.tags]
         
         doc.updated_at = datetime.now(timezone.utc)
-        
+
+        version = WikiDocVersion(
+            wiki_doc=doc,
+            wiki_doc_title=doc.title,
+            version_number=len(doc.versions) + 1,
+            content=doc.content,
+            tags=doc.tags,
+            updated_at=doc.updated_at,
+            updated_by=current_user.username
+        )
+        doc.versions.append(version)
+
         session.add(doc)
         session.commit()
         session.refresh(doc)
@@ -214,3 +236,12 @@ async def delete_tag(name: str, current_user: WikiUser = Depends(get_current_use
         session.delete(tag)
         session.commit()
         return {'message': f'The tag named {name} has been deleted.'}
+    
+# Get document versions
+@app.get('/documents/{title}/versions')
+async def get_document_versions(title: str):
+    with Session(engine) as session:
+        doc = session.get(WikiDoc, title)
+        if not doc:
+            raise HTTPException(status_code=404, detail='Cannot find document with the corresponding name.')
+        return doc.versions
