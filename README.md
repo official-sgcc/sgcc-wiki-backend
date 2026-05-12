@@ -28,7 +28,7 @@ Swagger UI: http://127.0.0.1:8000/docs
     - content - 본문
     - tags - 태그 리스트
   - response:
-    - 생성된 문서
+    - 문서 생성 메시지
 
 - `GET /documents/{title}` - 문서 조회
   - parameter:

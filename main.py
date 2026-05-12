@@ -109,7 +109,7 @@ async def create_document(doc_in: WikiDocCreate):
         session.add(default_permissions)
         session.commit()
         session.refresh(doc)
-        return doc
+        return {'message': f'The document named {doc.title} has been created.'}
 
 # Read document
 @app.get('/documents/{title}')
