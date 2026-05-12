@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, Depends, status, Header
 from sqlmodel import create_engine, Session, select, SQLModel
 from login_utils import hash_password, verify_password, create_jwt_token, verify_jwt_token
 from schemas.wiki_doc import WikiDoc, WikiDocCreate, WikiDocUpdate
-from schemas.wiki_user import WikiUser
+from schemas.wiki_user import WikiUser, UserRegister
 from schemas.permissions import Permissions
 from schemas.tags import WikiTag, WikiTagCreate
 from datetime import datetime, timezone
@@ -161,16 +161,16 @@ async def search_documents(keyword: str, search_type: str = 'title'):
 
 # Register user
 @app.post('/register')
-async def register_user(username: str, password: str):
+async def register_user(user_info: UserRegister):
     with Session(engine) as session:
-        if session.get(WikiUser, username):
+        if session.get(WikiUser, user_info.username):
             raise HTTPException(status_code=400, detail='Username already exists.')
         
-        user = WikiUser(username=username, password=hash_password(password), permission='login_user')
+        user = WikiUser(username=user_info.username, password=hash_password(user_info.password), permission='login_user')
         session.add(user)
         session.commit()
         session.refresh(user)
-        return {'message': f'User {username} has been registered successfully.'}
+        return {'message': f'User {user_info.username} has been registered successfully.'}
     
 # Get user info
 @app.get('/users/{username}')
