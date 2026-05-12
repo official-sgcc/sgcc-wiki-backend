@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, Depends, status, Header
 from sqlmodel import create_engine, Session, select, SQLModel
 from login_utils import hash_password, verify_password, create_jwt_token, verify_jwt_token
 from schemas.wiki_doc import WikiDoc, WikiDocCreate, WikiDocUpdate, WikiDocVersion
-from schemas.wiki_user import WikiUser, UserRegister
+from schemas.wiki_user import WikiUser, UserIdAndPassword
 from schemas.permissions import Permissions
 from schemas.tags import WikiTag, WikiTagCreate
 from datetime import datetime, timezone
@@ -183,7 +183,7 @@ async def search_documents(keyword: str, search_type: str = 'title'):
 
 # Register user
 @app.post('/register')
-async def register_user(user_info: UserRegister):
+async def register_user(user_info: UserIdAndPassword):
     with Session(engine) as session:
         if session.get(WikiUser, user_info.username):
             raise HTTPException(status_code=400, detail='Username already exists.')
@@ -205,16 +205,16 @@ async def get_user_info(username: str):
     
 # Login user
 @app.post('/login')
-async def login_user(username: str, password: str):
+async def login_user(user_info: UserIdAndPassword):
     with Session(engine) as session:
-        user = session.get(WikiUser, username)
+        user = session.get(WikiUser, user_info.username)
         if not user:
             raise HTTPException(status_code=404, detail='Cannot find user with the corresponding username.')
         
-        if not verify_password(password, user.password):
+        if not verify_password(user_info.password, user.password):
             raise HTTPException(status_code=401, detail='Incorrect password.')
         
-        token = create_jwt_token(username)
+        token = create_jwt_token(user_info.username)
         
         return {'token': token}
 
