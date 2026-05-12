@@ -2,7 +2,7 @@
 ## 실행
 
 ```bash
-pip install fastapi sqlmodel bcrypt pyjwt python-dotenv uvicorn
+pip install fastapi sqlmodel bcrypt pyjwt python-dotenv uvicorn apscheduler
 ```
 
 ```bash
