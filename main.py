@@ -4,6 +4,7 @@ from login_utils import hash_password, verify_password, create_jwt_token, verify
 from schemas.wiki_doc import WikiDoc, WikiDocCreate, WikiDocUpdate
 from schemas.wiki_user import WikiUser
 from schemas.permissions import Permissions
+from schemas.tags import WikiTag, WikiTagCreate
 from datetime import datetime, timezone
 
 app = FastAPI()
@@ -143,3 +144,42 @@ async def login_user(username: str, password: str):
         token = create_jwt_token(username)
         
         return {'token': token}
+
+# Get all tags
+@app.get('/tags')
+async def get_tags():
+    with Session(engine) as session:
+        return session.exec(select(WikiTag)).all()
+
+# Create tag
+@app.post('/tags')
+async def create_tag(tag_in: WikiTagCreate, current_user: WikiUser = Depends(get_current_user)):
+    with Session(engine) as session:
+        if session.get(WikiTag, tag_in.name):
+            raise HTTPException(status_code=400, detail='Tag name already exists.')
+        
+        tag = WikiTag(**tag_in.model_dump())
+        session.add(tag)
+        session.commit()
+        session.refresh(tag)
+        return tag
+
+# Get tag
+@app.get('/tags/{name}')
+async def get_tag(name: str):
+    with Session(engine) as session:
+        tag = session.get(WikiTag, name)
+        if not tag:
+            raise HTTPException(status_code=404, detail='Cannot find the corresponding tag.')
+        return tag
+
+# Delete tag
+@app.delete('/tags/{name}')
+async def delete_tag(name: str, current_user: WikiUser = Depends(get_current_user)):
+    with Session(engine) as session:
+        if not (tag := session.get(WikiTag, name)):
+            raise HTTPException(status_code=404, detail='Cannot find tag to delete.')
+
+        session.delete(tag)
+        session.commit()
+        return {'message': f'The tag named {name} has been deleted.'}
