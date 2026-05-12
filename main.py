@@ -122,7 +122,23 @@ async def delete_document(title: str, current_user: WikiUser = Depends(get_curre
         session.delete(doc)
         session.commit()
         return {'message': f'The document named {title} has been deleted.'}
-    
+
+# Search documents
+@app.get('/search')
+async def search_documents(keyword: str, search_type: str = 'title'):
+    with Session(engine) as session:
+        if search_type == 'title':
+            statement = select(WikiDoc).where(WikiDoc.title.contains(keyword))
+        elif search_type == 'title_content':
+            statement = select(WikiDoc).where(
+                WikiDoc.title.contains(keyword) | WikiDoc.content.contains(keyword)
+            )
+        elif search_type == 'tag':
+            statement = select(WikiDoc).where(WikiDoc.tags.contains(keyword))
+        else:
+            raise HTTPException(status_code=400, detail='Invalid search type.')
+        return session.exec(statement).all()
+
 # Register user
 @app.post('/register')
 async def register_user(username: str, password: str):
