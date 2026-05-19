@@ -93,6 +93,7 @@ async def create_document(doc_in: WikiDocCreate):
             wiki_doc_title=doc.title,
             version_number=1,
             content=doc.content,
+            category=doc.category,
             tags=[{'name': tag.name} if hasattr(tag, 'name') else tag for tag in doc.tags],
             updated_at=doc.updated_at,
             updated_by='placeholder'
@@ -136,6 +137,9 @@ async def update_document(title: str, update_data: WikiDocUpdate, current_user: 
         if update_data.tags is not None:
             doc.tags = [tag.model_dump() if hasattr(tag, 'model_dump') else tag for tag in update_data.tags]
         
+        if update_data.category is not None:
+            doc.category = update_data.category
+        
         doc.updated_at = datetime.now(timezone.utc)
 
         version = WikiDocVersion(
@@ -143,6 +147,7 @@ async def update_document(title: str, update_data: WikiDocUpdate, current_user: 
             wiki_doc_title=doc.title,
             version_number=len(doc.versions) + 1,
             content=doc.content,
+            category=doc.category,
             tags=doc.tags,
             updated_at=doc.updated_at,
             updated_by=current_user.username

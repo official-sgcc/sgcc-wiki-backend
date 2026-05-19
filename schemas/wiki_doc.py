@@ -9,7 +9,7 @@ from .categories import WikiCategory
 class WikiDoc(SQLModel, table=True):
     title: str = Field(primary_key=True)
     content: str
-    category: WikiCategory
+    category: WikiCategory = Field(sa_type=JSON)
     tags: list[WikiTag] = Field(default_factory=list, sa_type=JSON)
     updated_at: datetime
     permissions: Permissions | None = Relationship()
@@ -31,7 +31,7 @@ class WikiDocVersion(SQLModel, table=True):
     version_number: int = Field(primary_key=True)
     wiki_doc: WikiDoc = Relationship(back_populates='versions')
     content: str
-    category: WikiCategory
+    category: WikiCategory = Field(sa_type=JSON)
     tags: list = Field(default_factory=list, sa_type=JSON)
     updated_at: datetime
     updated_by: str
