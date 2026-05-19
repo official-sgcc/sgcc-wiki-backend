@@ -4,10 +4,12 @@ from datetime import datetime
 from sqlalchemy.types import JSON
 from .permissions import Permissions
 from .tags import WikiTag
+from .categories import WikiCategory
 
 class WikiDoc(SQLModel, table=True):
     title: str = Field(primary_key=True)
     content: str
+    category: WikiCategory
     tags: list[WikiTag] = Field(default_factory=list, sa_type=JSON)
     updated_at: datetime
     permissions: Permissions | None = Relationship()
@@ -16,10 +18,12 @@ class WikiDoc(SQLModel, table=True):
 class WikiDocCreate(BaseModel):
     title: str
     content: str
+    category: WikiCategory
     tags: list[WikiTag] = Field(default_factory=list)
 
 class WikiDocUpdate(BaseModel):
     content: str | None = None
+    category: WikiCategory | None = None
     tags: list[WikiTag] | None = None
 
 class WikiDocVersion(SQLModel, table=True):
@@ -27,6 +31,7 @@ class WikiDocVersion(SQLModel, table=True):
     version_number: int = Field(primary_key=True)
     wiki_doc: WikiDoc = Relationship(back_populates='versions')
     content: str
+    category: WikiCategory
     tags: list = Field(default_factory=list, sa_type=JSON)
     updated_at: datetime
     updated_by: str
