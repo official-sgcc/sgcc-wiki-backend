@@ -103,7 +103,7 @@ Swagger UI: http://127.0.0.1:8000/docs
   - request body:
     - name - 태그 이름
   - response:
-    - 생성된 태그 정보
+    - 태그 생성 완료 메시지
 
 - `GET /tags/{name}` - 특정 태그 정보 조회
   - parameter:
@@ -114,5 +114,28 @@ Swagger UI: http://127.0.0.1:8000/docs
 - `DELETE /tags/{name}` - 태그 삭제
   - parameter:
     - name - 삭제할 태그 이름
+  - response:
+    - 삭제 완료 메시지
+
+### 카테고리
+- `GET /categories` - 카테고리 전체 목록 조회
+  - response:
+    - 카테고리 전체 목록
+
+- `POST /categories` - 카테고리 생성
+  - request body:
+    - name - 카테고리 이름
+  - response:
+    - 카테고리 생성 완료 메시지
+
+- `GET /categories/{name}` - 특정 카테고리 정보 조회
+  - parameter:
+    - name - 카테고리 이름
+  - response:
+    - 특정 카테고리 정보
+
+- `DELETE /categories/{name}` - 카테고리 삭제
+  - parameter:
+    - name - 삭제할 카테고리 이름
   - response:
     - 삭제 완료 메시지
