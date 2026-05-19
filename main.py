@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from apscheduler.schedulers.background import BackgroundScheduler
 from contextlib import asynccontextmanager
+from diff_match_patch import diff_match_patch
 
 BACKUP_DIR = './db_backups'
 os.makedirs(BACKUP_DIR, exist_ok=True)
@@ -137,7 +138,7 @@ async def update_document(title: str, update_data: WikiDocUpdate, current_user: 
             doc.tags = [tag.model_dump() if hasattr(tag, 'model_dump') else tag for tag in update_data.tags]
         
         if update_data.category is not None:
-            doc.category = update_data.category
+            doc.category = (update_data.category.model_dump() if hasattr(update_data.category, 'model_dump') else update_data.category)
         
         doc.updated_at = datetime.now(timezone.utc)
 
@@ -270,3 +271,27 @@ async def get_document_versions(title: str):
         if not doc:
             raise HTTPException(status_code=404, detail='Cannot find document with the corresponding name.')
         return doc.versions
+    
+# Get specific document version
+@app.get('/documents/{title}/versions/{version_number}')
+async def get_document_version(title: str, version_number: int):
+    with Session(engine) as session:
+        version = session.get(WikiDocVersion, (title, version_number))
+        if not version:
+            raise HTTPException(status_code=404, detail='Cannot find the corresponding document version.')
+        return version
+    
+# Get difference of document update
+@app.get('/documents/{title}/diff/{version_number}')
+async def get_document_update_diff(title: str, version_number: int):
+    if version_number <= 1:
+        raise HTTPException(status_code=400, detail='No previous version to compare with.')
+    with Session(engine) as session:
+        original = session.get(WikiDocVersion, (title, version_number - 1))
+        updated = session.get(WikiDocVersion, (title, version_number))
+        if not original or not updated:
+            raise HTTPException(status_code=404, detail='Cannot find the corresponding document versions.')
+        dmp = diff_match_patch()
+        diffs = dmp.diff_main(original.content, updated.content)
+        dmp.diff_cleanupSemantic(diffs)
+        return diffs

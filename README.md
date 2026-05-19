@@ -2,7 +2,7 @@
 ## 실행
 
 ```bash
-pip install fastapi sqlmodel bcrypt pyjwt python-dotenv uvicorn apscheduler
+pip install fastapi sqlmodel bcrypt pyjwt python-dotenv uvicorn apscheduler diff_match_patch
 ```
 
 ```bash
@@ -51,6 +51,20 @@ Swagger UI: http://127.0.0.1:8000/docs
     - title - 문서 제목
   - response:
     - 문서 버전 리스트
+
+- `GET /documents/{title}/version/{version_number}` - 문서 특정 버전 조회
+  - parameter:
+    - title - 문서 제목
+    - version_number - 문서 버전
+  - response:
+    - 특정 버전 문서
+
+- `GET /documents/{title}/diff/{version_number}` - 특정 버전 수정 사항(diff)
+  - parameter:
+    - title - 문서 제목
+    - version_number - 문서 버전
+  - response:
+    - 수정 사항(diff 객체)
 
 - `GET /search` - 문서 검색
   - parameter:
