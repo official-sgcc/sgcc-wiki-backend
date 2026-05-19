@@ -7,6 +7,7 @@ from schemas.wiki_doc import WikiDoc, WikiDocCreate, WikiDocUpdate, WikiDocVersi
 from schemas.wiki_user import WikiUser, UserIdAndPassword
 from schemas.permissions import Permissions
 from schemas.tags import WikiTag, WikiTagCreate
+from schemas.categories import WikiCategory, WikiCategoryCreate
 from datetime import datetime, timezone
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -265,3 +266,42 @@ async def get_document_versions(title: str):
         if not doc:
             raise HTTPException(status_code=404, detail='Cannot find document with the corresponding name.')
         return doc.versions
+    
+# Get all categories
+@app.get('/categories')
+async def get_categories():
+    with Session(engine) as session:
+        return session.exec(select(WikiCategory)).all()
+
+# Create category
+@app.post('/categories')
+async def create_category(category_in: WikiCategoryCreate, current_user: WikiUser = Depends(get_current_user)):
+    with Session(engine) as session:
+        if session.get(WikiCategory, category_in.name):
+            raise HTTPException(status_code=400, detail='Category name already exists.')
+        
+        category = WikiCategory(**category_in.model_dump())
+        session.add(category)
+        session.commit()
+        session.refresh(category)
+        return category
+
+# Get category
+@app.get('/categories/{name}')
+async def get_category(name: str):
+    with Session(engine) as session:
+        category = session.get(WikiCategory, name)
+        if not category:
+            raise HTTPException(status_code=404, detail='Cannot find the corresponding category.')
+        return category
+
+# Delete category
+@app.delete('/categories/{name}')
+async def delete_category(name: str, current_user: WikiUser = Depends(get_current_user)):
+    with Session(engine) as session:
+        if not (category := session.get(WikiCategory, name)):
+            raise HTTPException(status_code=404, detail='Cannot find category to delete.')
+
+        session.delete(category)
+        session.commit()
+        return {'message': f'The category named {name} has been deleted.'}

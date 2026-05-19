@@ -102,3 +102,26 @@ Swagger UI: http://127.0.0.1:8000/docs
     - name - 삭제할 태그 이름
   - response:
     - 삭제 완료 메시지
+
+### 카테고리
+- `GET /categories` - 카테고리 전체 목록 조회
+  - response:
+    - 카테고리 전체 목록
+
+- `POST /categories` - 카테고리 생성
+  - request body:
+    - name - 카테고리 이름
+  - response:
+    - 생성된 카테고리 정보
+
+- `GET /categories/{name}` - 특정 카테고리 정보 조회
+  - parameter:
+    - name - 카테고리 이름
+  - response:
+    - 특정 카테고리 정보
+
+- `DELETE /categories/{name}` - 카테고리 삭제
+  - parameter:
+    - name - 삭제할 카테고리 이름
+  - response:
+    - 삭제 완료 메시지
