@@ -241,7 +241,7 @@ async def create_tag(tag_in: WikiTagCreate, current_user: WikiUser = Depends(get
         session.add(tag)
         session.commit()
         session.refresh(tag)
-        return tag
+        return {'message': f'The tag named {tag_in.name} has been created.'}
 
 # Get tag
 @app.get('/tags/{name}')
@@ -289,7 +289,7 @@ async def create_category(category_in: WikiCategoryCreate, current_user: WikiUse
         session.add(category)
         session.commit()
         session.refresh(category)
-        return category
+        return {'message': f'The category named {category_in.name} has been created.'}
 
 # Get category
 @app.get('/categories/{name}')

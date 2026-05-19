@@ -89,7 +89,7 @@ Swagger UI: http://127.0.0.1:8000/docs
   - request body:
     - name - 태그 이름
   - response:
-    - 생성된 태그 정보
+    - 태그 생성 완료 메시지
 
 - `GET /tags/{name}` - 특정 태그 정보 조회
   - parameter:
@@ -112,7 +112,7 @@ Swagger UI: http://127.0.0.1:8000/docs
   - request body:
     - name - 카테고리 이름
   - response:
-    - 생성된 카테고리 정보
+    - 카테고리 생성 완료 메시지
 
 - `GET /categories/{name}` - 특정 카테고리 정보 조회
   - parameter:
