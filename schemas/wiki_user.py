@@ -11,4 +11,4 @@ class WikiUser(SQLModel, table=True):
     password: str
     permission: str
     bio: str
-    email: str
+    email: str | None = Field(default=None, unique=True, index=True)
