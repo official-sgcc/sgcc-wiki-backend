@@ -49,7 +49,9 @@ app.add_middleware(
 engine = create_engine('sqlite:///wiki.db')
 SQLModel.metadata.create_all(engine)
 
-async def get_current_user(auth: str = Header(...)):
+async def get_current_user(auth: str = Header(None)):
+    if auth is None:
+        return None
     username = verify_jwt_token(auth)
 
     with Session(engine) as session:
@@ -64,7 +66,8 @@ def check_document_permission(session: Session, current_user: WikiUser, title: s
     if not permission:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Document permissions not configured')
     allowed = getattr(permission, action, None)
-    if not allowed or current_user.permission not in allowed:
+    current_user_permission = current_user.permission if current_user else None
+    if not allowed or current_user_permission not in allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f'Requires document-specific \'{action}\' permission')
 
 # Get documents
@@ -195,7 +198,7 @@ async def register_user(user_info: UserIdAndPassword):
         if session.get(WikiUser, user_info.username):
             raise HTTPException(status_code=400, detail='Username already exists.')
         
-        user = WikiUser(username=user_info.username, password=hash_password(user_info.password), permission='login_user')
+        user = WikiUser(username=user_info.username, password=hash_password(user_info.password), permission='login_user', bio='', email='')
         session.add(user)
         session.commit()
         session.refresh(user)
@@ -203,12 +206,15 @@ async def register_user(user_info: UserIdAndPassword):
     
 # Get user info
 @app.get('/users/{username}')
-async def get_user_info(username: str):
+async def get_user_info(username: str, current_user: WikiUser = Depends(get_current_user)):
     with Session(engine) as session:
         user = session.get(WikiUser, username)
         if not user:
             raise HTTPException(status_code=404, detail='Cannot find user with the corresponding username.')
-        return user
+        if current_user is None or current_user.username != username:
+            return user.model_dump(exclude={'password', 'email'})
+        else:
+            return user.model_dump(exclude={'password'})
     
 # Login user
 @app.post('/login')

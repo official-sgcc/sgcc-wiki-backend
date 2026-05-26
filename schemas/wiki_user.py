@@ -10,3 +10,5 @@ class WikiUser(SQLModel, table=True):
     username: str = Field(primary_key=True)
     password: str
     permission: str
+    bio: str
+    email: str
