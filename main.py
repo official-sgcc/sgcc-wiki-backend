@@ -271,6 +271,8 @@ async def get_tag(name: str):
 @app.delete('/tags/{name}')
 async def delete_tag(name: str, current_user: WikiUser = Depends(get_current_user)):
     with Session(engine) as session:
+        if current_user.permission != 'admin':
+            raise HTTPException(status_code=403, detail='Admin permission required to delete tags.')
         if not (tag := session.get(WikiTag, name)):
             raise HTTPException(status_code=404, detail='Cannot find tag to delete.')
 
