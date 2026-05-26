@@ -16,6 +16,9 @@ from contextlib import asynccontextmanager
 from diff_match_patch import diff_match_patch
 
 BACKUP_DIR = './db_backups'
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+RESERVED_USERNAMES = {'guest', 'admin', 'system', 'bot', 'anonymous'}
+
 os.makedirs(BACKUP_DIR, exist_ok=True)
 
 def backup_database():
@@ -35,8 +38,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 load_dotenv()
-
-FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
 
 app.add_middleware(
     CORSMiddleware,
@@ -198,7 +199,14 @@ async def register_user(user_info: UserIdAndPassword):
         if session.get(WikiUser, user_info.username):
             raise HTTPException(status_code=400, detail='Username already exists.')
         
+        if user_info.username.lower() in RESERVED_USERNAMES:
+            raise HTTPException(
+                status_code=400,
+                detail='This username is reserved and cannot be used.',
+            )
+    
         user = WikiUser(username=user_info.username, password=hash_password(user_info.password), permission='login_user', bio='', email='')
+
         session.add(user)
         session.commit()
         session.refresh(user)
