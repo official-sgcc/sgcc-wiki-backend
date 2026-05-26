@@ -84,7 +84,7 @@ async def get_documents(keyword: str | None = None):
 
 # Create document
 @app.post('/documents')
-async def create_document(doc_in: WikiDocCreate):
+async def create_document(doc_in: WikiDocCreate, current_user: WikiUser | None = Depends(get_current_user)):
     with Session(engine) as session:
         if session.get(WikiDoc, doc_in.title):
             raise HTTPException(status_code=400, detail='There is already a document with the same name.')
@@ -100,7 +100,7 @@ async def create_document(doc_in: WikiDocCreate):
             category=doc.category,
             tags=[{'name': tag.name} if hasattr(tag, 'name') else tag for tag in doc.tags],
             updated_at=doc.updated_at,
-            updated_by='placeholder'
+            updated_by=current_user.username if current_user else 'guest'
         )
         doc.versions.append(version)
 
