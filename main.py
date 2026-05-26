@@ -211,10 +211,18 @@ async def get_user_info(username: str, current_user: WikiUser = Depends(get_curr
         user = session.get(WikiUser, username)
         if not user:
             raise HTTPException(status_code=404, detail='Cannot find user with the corresponding username.')
+
+        edit_versions = session.exec(
+            select(WikiDocVersion)
+            .where(WikiDocVersion.updated_by == username)
+            .order_by(WikiDocVersion.updated_at.desc())
+        ).all()
         if current_user is None or current_user.username != username:
-            return user.model_dump(exclude={'password', 'email'})
+            user_data = user.model_dump(exclude={'password', 'email'})
         else:
-            return user.model_dump(exclude={'password'})
+            user_data = user.model_dump(exclude={'password'})
+        user_data['edit_versions'] = edit_versions
+        return user_data
     
 # Login user
 @app.post('/login')
