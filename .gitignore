@@ -3,3 +3,8 @@ __pycache__/
 .vscode/settings.json
 db_backups/
 logs/
+.DS_Store
+.pytest_cache/
+*.db-journal
+*.db-wal
+*.db-shm
