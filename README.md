@@ -108,7 +108,7 @@ pytest
 
 조회/생성 외 일부 엔드포인트는 admin 권한이 필요합니다 (`DELETE /tags`, `DELETE /categories`).
 
-문서 수정·삭제·이동·댓글은 **문서별로 따로 설정된 권한**(`Permissions` 테이블)에 따라 허용 여부가 결정됩니다.
+문서 수정·삭제·이동·댓글은 **문서별로 따로 설정된 권한**(`Permissions` 테이블)에 따라 허용 여부가 결정됩니다. 단, 문서 작성자(`WikiDoc.created_by`)는 자신이 만든 문서를 별도 권한 없이 삭제할 수 있습니다.
 
 ### 입력 정책
 
@@ -168,7 +168,7 @@ pytest
   - parameter:
     - title - 문서 제목
   - headers:
-    - jwt 토큰 (해당 문서의 delete 권한 보유자)
+    - jwt 토큰 (해당 문서의 작성자이거나, 해당 문서의 delete 권한 보유자)
   - response:
     - 삭제 완료 메시지
 
@@ -321,6 +321,19 @@ pytest
 1. `db_backups/`로 현재 DB가 백업되어 있는지 확인
 2. `wiki.db`를 임시로 옮기거나 백업 후, 서버를 다시 띄워 새 스키마로 재생성
 3. 필요 시 이전 데이터를 마이그레이션해서 다시 채워 넣기
+
+#### 기존 wiki.db에 `created_by` 컬럼 백필 (작성자 삭제 권한 도입 시)
+
+`WikiDoc.created_by` 컬럼은 새 문서에는 자동으로 채워지지만, 기존 문서는 `NULL`이라 작성자 삭제 권한을 못 받습니다. 백필이 필요하면 SQLite에서 직접 실행하세요:
+
+```sql
+ALTER TABLE wikidoc ADD COLUMN created_by VARCHAR;
+UPDATE wikidoc
+SET created_by = (
+    SELECT updated_by FROM wikidocversion
+    WHERE wiki_doc_title = wikidoc.title AND version_number = 1
+);
+```
 
 추후 데이터가 의미 있게 누적되면 Alembic 같은 마이그레이션 도구 도입을 검토하세요.
 

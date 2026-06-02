@@ -73,21 +73,36 @@ def test_update_document_creates_version(client, auth_headers):
     assert len(versions) == 2
 
 
-def test_delete_document_admin_only_by_default(client, auth_headers, admin_headers):
-    user_headers, _ = auth_headers('alice123')
-    _prep_tag_and_category(client, user_headers)
+def test_delete_document_other_users_forbidden(client, auth_headers, admin_headers):
+    alice_headers, _ = auth_headers('alice123')
+    _prep_tag_and_category(client, alice_headers)
     client.post('/documents', json={
         'title': 'Doc1',
         'content': 'v1',
         'category': {'name': 'General'},
         'tags': [],
-    }, headers=user_headers)
+    }, headers=alice_headers)
 
-    resp = client.delete('/documents/Doc1', headers=user_headers)
+    bob_headers, _ = auth_headers('bob456')
+    resp = client.delete('/documents/Doc1', headers=bob_headers)
     assert resp.status_code == 403
 
     admin, _ = admin_headers
     resp = client.delete('/documents/Doc1', headers=admin)
+    assert resp.status_code == 200
+
+
+def test_delete_document_creator_can_delete(client, auth_headers):
+    headers, _ = auth_headers('alice123')
+    _prep_tag_and_category(client, headers)
+    client.post('/documents', json={
+        'title': 'Doc1',
+        'content': 'v1',
+        'category': {'name': 'General'},
+        'tags': [],
+    }, headers=headers)
+
+    resp = client.delete('/documents/Doc1', headers=headers)
     assert resp.status_code == 200
 
 

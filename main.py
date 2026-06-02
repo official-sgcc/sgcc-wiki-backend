@@ -180,6 +180,7 @@ async def create_document(doc_in: WikiDocCreate, current_user: WikiUser = Depend
         validate_tags_and_category(session, doc_in.tags, doc_in.category)
 
         doc = WikiDoc(**doc_in.model_dump())
+        doc.created_by = current_user.username
         doc.updated_at = datetime.now(timezone.utc)
 
         version = WikiDocVersion(
@@ -273,7 +274,13 @@ async def delete_document(title: str, current_user: WikiUser = Depends(get_curre
         if not (doc := session.get(WikiDoc, title)):
             raise HTTPException(status_code=404, detail='Cannot find document to delete')
 
-        check_document_permission(session, current_user, title, 'delete')
+        is_creator = (
+            current_user is not None
+            and doc.created_by is not None
+            and doc.created_by == current_user.username
+        )
+        if not is_creator:
+            check_document_permission(session, current_user, title, 'delete')
 
         session.delete(doc)
         session.commit()

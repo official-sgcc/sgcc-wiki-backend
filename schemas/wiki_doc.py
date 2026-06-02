@@ -11,6 +11,7 @@ class WikiDoc(SQLModel, table=True):
     content: str
     category: WikiCategory = Field(sa_type=JSON)
     tags: list[WikiTag] = Field(default_factory=list, sa_type=JSON)
+    created_by: str | None = None
     updated_at: datetime
     permissions: Permissions | None = Relationship(
         sa_relationship_kwargs={'cascade': 'all, delete-orphan', 'single_parent': True}
