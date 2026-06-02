@@ -1,8 +1,11 @@
-import shutil
+import logging
 import os
-from fastapi import FastAPI, HTTPException, Depends, status, Header
+import sqlite3
+from logging.handlers import RotatingFileHandler
+from fastapi import FastAPI, HTTPException, Depends, status, Header, Request
 from sqlmodel import create_engine, Session, select, SQLModel
-from login_utils import hash_password, verify_password, create_jwt_token, verify_jwt_token
+from sqlalchemy.exc import IntegrityError
+from login_utils import hash_password, verify_password, create_jwt_token, verify_jwt_token, validate_username, validate_password
 from schemas.wiki_doc import WikiDoc, WikiDocCreate, WikiDocUpdate, WikiDocVersion
 from schemas.wiki_user import WikiUser, UserIdAndPassword
 from schemas.permissions import Permissions
@@ -14,8 +17,26 @@ from dotenv import load_dotenv
 from apscheduler.schedulers.background import BackgroundScheduler
 from contextlib import asynccontextmanager
 from diff_match_patch import diff_match_patch
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+load_dotenv()
+
+LOG_DIR = './logs'
+os.makedirs(LOG_DIR, exist_ok=True)
+
+log_formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
+file_handler = RotatingFileHandler(f'{LOG_DIR}/app.log', maxBytes=5_000_000, backupCount=5)
+file_handler.setFormatter(log_formatter)
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(log_formatter)
+
+logging.basicConfig(level=logging.INFO, handlers=[stream_handler, file_handler])
+logger = logging.getLogger('sgcc-wiki')
 
 BACKUP_DIR = './db_backups'
+DB_PATH = os.getenv('DB_PATH', 'wiki.db')
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
 RESERVED_USERNAMES = {'guest', 'admin', 'system', 'bot', 'anonymous'}
 
@@ -25,10 +46,48 @@ def backup_database():
     today_str = datetime.now().strftime('%Y%m%d_%Hh%Mm%Ss')
     backup_path = f'{BACKUP_DIR}/db_backup_{today_str}.db'
 
-    shutil.copy2('wiki.db', backup_path)
+    source = sqlite3.connect(DB_PATH)
+    dest = sqlite3.connect(backup_path)
+    try:
+        with dest:
+            source.backup(dest)
+        logger.info('database backup created: %s', backup_path)
+    except Exception:
+        logger.exception('database backup failed: %s', backup_path)
+        raise
+    finally:
+        source.close()
+        dest.close()
+
+def bootstrap_admin():
+    admin_username = os.getenv('ADMIN_USERNAME')
+    admin_password = os.getenv('ADMIN_PASSWORD')
+    if not admin_username or not admin_password:
+        return
+
+    with Session(engine) as session:
+        user = session.get(WikiUser, admin_username)
+        if user:
+            if user.permission != 'admin':
+                user.permission = 'admin'
+                session.add(user)
+                session.commit()
+                logger.info('admin bootstrap: promoted existing user to admin: %s', admin_username)
+        else:
+            user = WikiUser(
+                username=admin_username,
+                password=hash_password(admin_password),
+                permission='admin',
+                bio='',
+                email=None,
+            )
+            session.add(user)
+            session.commit()
+            logger.info('admin bootstrap: created admin user: %s', admin_username)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    bootstrap_admin()
     scheduler = BackgroundScheduler()
     scheduler.add_job(backup_database, 'cron', hour=0, minute=0)
     scheduler.start()
@@ -37,23 +96,35 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-load_dotenv()
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[FRONTEND_URL, 'http://localhost:5173', 'http://127.0.0.1:5173'],
     allow_credentials=True,
-    allow_methods=['*'],
-    allow_headers=['*']
+    allow_methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allow_headers=['Content-Type', 'auth', 'Authorization'],
 )
 
-engine = create_engine('sqlite:///wiki.db')
+engine = create_engine(f'sqlite:///{DB_PATH}')
 SQLModel.metadata.create_all(engine)
 
-async def get_current_user(auth: str = Header(None)):
-    if auth is None:
+async def get_current_user(
+    auth: str | None = Header(None),
+    authorization: str | None = Header(None),
+):
+    token = None
+    if authorization and authorization.lower().startswith('bearer '):
+        token = authorization[7:].strip()
+    elif auth:
+        token = auth
+
+    if not token:
         return None
-    username = verify_jwt_token(auth)
+
+    username = verify_jwt_token(token)
 
     with Session(engine) as session:
         user = session.get(WikiUser, username)
@@ -71,25 +142,43 @@ def check_document_permission(session: Session, current_user: WikiUser, title: s
     if not allowed or current_user_permission not in allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f'Requires document-specific \'{action}\' permission')
 
+# Validate that referenced tags/category exist in DB
+def validate_tags_and_category(session: Session, tags, category):
+    if category is not None:
+        cat_name = category.name if hasattr(category, 'name') else category.get('name')
+        if not session.get(WikiCategory, cat_name):
+            raise HTTPException(status_code=400, detail=f"Category '{cat_name}' does not exist.")
+    for tag in tags or []:
+        tag_name = tag.name if hasattr(tag, 'name') else tag.get('name')
+        if not session.get(WikiTag, tag_name):
+            raise HTTPException(status_code=400, detail=f"Tag '{tag_name}' does not exist.")
+
 # Get documents
 @app.get('/documents')
-async def get_documents(keyword: str | None = None):
+async def get_documents(keyword: str | None = None, limit: int | None = None, offset: int = 0):
+    keyword = keyword.strip() if keyword else None
     with Session(engine) as session:
         if keyword:
             statement = select(WikiDoc).where(
                 WikiDoc.title.contains(keyword) | WikiDoc.content.contains(keyword)
             )
-            return session.exec(statement).all()
         else:
-            return session.exec(select(WikiDoc)).all()
+            statement = select(WikiDoc)
+        if limit is not None:
+            statement = statement.offset(offset).limit(limit)
+        return session.exec(statement).all()
 
 # Create document
 @app.post('/documents')
-async def create_document(doc_in: WikiDocCreate, current_user: WikiUser | None = Depends(get_current_user)):
+async def create_document(doc_in: WikiDocCreate, current_user: WikiUser = Depends(get_current_user)):
+    if current_user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Login required to create a document.')
     with Session(engine) as session:
         if session.get(WikiDoc, doc_in.title):
             raise HTTPException(status_code=400, detail='There is already a document with the same name.')
-        
+
+        validate_tags_and_category(session, doc_in.tags, doc_in.category)
+
         doc = WikiDoc(**doc_in.model_dump())
         doc.updated_at = datetime.now(timezone.utc)
 
@@ -101,7 +190,7 @@ async def create_document(doc_in: WikiDocCreate, current_user: WikiUser | None =
             category=doc.category,
             tags=[{'name': tag.name} if hasattr(tag, 'name') else tag for tag in doc.tags],
             updated_at=doc.updated_at,
-            updated_by=current_user.username if current_user else 'guest'
+            updated_by=current_user.username
         )
         doc.versions.append(version)
 
@@ -116,6 +205,7 @@ async def create_document(doc_in: WikiDocCreate, current_user: WikiUser | None =
         session.add(default_permissions)
         session.commit()
         session.refresh(doc)
+        logger.info('document created: %s by %s', doc.title, current_user.username)
         return {'message': f'The document named {doc.title} has been created.'}
 
 # Read document
@@ -136,32 +226,45 @@ async def update_document(title: str, update_data: WikiDocUpdate, current_user: 
 
         check_document_permission(session, current_user, title, 'update')
 
-        if update_data.content is not None:
-            doc.content = update_data.content
-            
-        if update_data.tags is not None:
-            doc.tags = [tag.model_dump() if hasattr(tag, 'model_dump') else tag for tag in update_data.tags]
-        
-        if update_data.category is not None:
-            doc.category = (update_data.category.model_dump() if hasattr(update_data.category, 'model_dump') else update_data.category)
-        
-        doc.updated_at = datetime.now(timezone.utc)
+        validate_tags_and_category(session, update_data.tags, update_data.category)
 
-        version = WikiDocVersion(
-            wiki_doc=doc,
-            wiki_doc_title=doc.title,
-            version_number=len(doc.versions) + 1,
-            content=doc.content,
-            category=doc.category,
-            tags=doc.tags,
-            updated_at=doc.updated_at,
-            updated_by=current_user.username
-        )
-        doc.versions.append(version)
+        for _ in range(3):
+            if update_data.content is not None:
+                doc.content = update_data.content
 
-        session.add(doc)
-        session.commit()
+            if update_data.tags is not None:
+                doc.tags = [tag.model_dump() if hasattr(tag, 'model_dump') else tag for tag in update_data.tags]
+
+            if update_data.category is not None:
+                doc.category = (update_data.category.model_dump() if hasattr(update_data.category, 'model_dump') else update_data.category)
+
+            doc.updated_at = datetime.now(timezone.utc)
+
+            version = WikiDocVersion(
+                wiki_doc=doc,
+                wiki_doc_title=doc.title,
+                version_number=len(doc.versions) + 1,
+                content=doc.content,
+                category=doc.category,
+                tags=doc.tags,
+                updated_at=doc.updated_at,
+                updated_by=current_user.username
+            )
+            doc.versions.append(version)
+
+            try:
+                session.add(doc)
+                session.commit()
+                break
+            except IntegrityError:
+                session.rollback()
+                doc = session.get(WikiDoc, title)
+        else:
+            logger.warning('document update gave up after retries: %s', title)
+            raise HTTPException(status_code=409, detail='Could not save document version due to concurrent updates. Try again.')
+
         session.refresh(doc)
+        logger.info('document updated: %s by %s (version %d)', title, current_user.username, len(doc.versions))
         return doc
 
 @app.delete('/documents/{title}')
@@ -174,11 +277,15 @@ async def delete_document(title: str, current_user: WikiUser = Depends(get_curre
 
         session.delete(doc)
         session.commit()
+        logger.info('document deleted: %s by %s', title, current_user.username if current_user else 'unknown')
         return {'message': f'The document named {title} has been deleted.'}
 
 # Search documents
 @app.get('/search')
-async def search_documents(keyword: str, search_type: str = 'title'):
+async def search_documents(keyword: str, search_type: str = 'title', limit: int | None = None, offset: int = 0):
+    keyword = keyword.strip()
+    if not keyword:
+        raise HTTPException(status_code=400, detail='Search keyword cannot be empty.')
     with Session(engine) as session:
         if search_type == 'title':
             statement = select(WikiDoc).where(WikiDoc.title.contains(keyword))
@@ -187,29 +294,44 @@ async def search_documents(keyword: str, search_type: str = 'title'):
                 WikiDoc.title.contains(keyword) | WikiDoc.content.contains(keyword)
             )
         elif search_type == 'tag':
-            statement = select(WikiDoc).where(WikiDoc.tags.contains(keyword))
+            statement = select(WikiDoc).where(WikiDoc.tags.contains(f'"{keyword}"'))
+            docs = session.exec(statement).all()
+            docs = [
+                d for d in docs
+                if any((t.get('name') if isinstance(t, dict) else getattr(t, 'name', None)) == keyword for t in (d.tags or []))
+            ]
+            if limit is not None:
+                docs = docs[offset:offset + limit]
+            return docs
         else:
             raise HTTPException(status_code=400, detail='Invalid search type.')
+        if limit is not None:
+            statement = statement.offset(offset).limit(limit)
         return session.exec(statement).all()
 
 # Register user
 @app.post('/register')
-async def register_user(user_info: UserIdAndPassword):
+@limiter.limit('3/minute')
+async def register_user(request: Request, user_info: UserIdAndPassword):
+    validate_username(user_info.username)
+    validate_password(user_info.password)
+
     with Session(engine) as session:
         if session.get(WikiUser, user_info.username):
             raise HTTPException(status_code=400, detail='Username already exists.')
-        
+
         if user_info.username.lower() in RESERVED_USERNAMES:
             raise HTTPException(
                 status_code=400,
                 detail='This username is reserved and cannot be used.',
             )
-    
-        user = WikiUser(username=user_info.username, password=hash_password(user_info.password), permission='login_user', bio='', email='')
+
+        user = WikiUser(username=user_info.username, password=hash_password(user_info.password), permission='login_user', bio='', email=None)
 
         session.add(user)
         session.commit()
         session.refresh(user)
+        logger.info('user registered: %s', user_info.username)
         return {'message': f'User {user_info.username} has been registered successfully.'}
     
 # Get user info
@@ -234,17 +356,16 @@ async def get_user_info(username: str, current_user: WikiUser = Depends(get_curr
     
 # Login user
 @app.post('/login')
-async def login_user(user_info: UserIdAndPassword):
+@limiter.limit('5/minute')
+async def login_user(request: Request, user_info: UserIdAndPassword):
     with Session(engine) as session:
         user = session.get(WikiUser, user_info.username)
-        if not user:
-            raise HTTPException(status_code=404, detail='Cannot find user with the corresponding username.')
-        
-        if not verify_password(user_info.password, user.password):
-            raise HTTPException(status_code=401, detail='Incorrect password.')
-        
+        if not user or not verify_password(user_info.password, user.password):
+            logger.warning('login failed for username: %s', user_info.username)
+            raise HTTPException(status_code=401, detail='Invalid username or password.')
+
         token = create_jwt_token(user_info.username)
-        
+        logger.info('login success: %s', user_info.username)
         return {'token': token}
 
 # Get all tags
@@ -256,6 +377,8 @@ async def get_tags():
 # Create tag
 @app.post('/tags')
 async def create_tag(tag_in: WikiTagCreate, current_user: WikiUser = Depends(get_current_user)):
+    if current_user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Login required to create a tag.')
     with Session(engine) as session:
         if session.get(WikiTag, tag_in.name):
             raise HTTPException(status_code=400, detail='Tag name already exists.')
@@ -264,6 +387,7 @@ async def create_tag(tag_in: WikiTagCreate, current_user: WikiUser = Depends(get
         session.add(tag)
         session.commit()
         session.refresh(tag)
+        logger.info('tag created: %s by %s', tag_in.name, current_user.username)
         return {'message': f'The tag named {tag_in.name} has been created.'}
 
 # Get tag
@@ -278,14 +402,22 @@ async def get_tag(name: str):
 # Delete tag
 @app.delete('/tags/{name}')
 async def delete_tag(name: str, current_user: WikiUser = Depends(get_current_user)):
+    if current_user is None or current_user.permission != 'admin':
+        raise HTTPException(status_code=403, detail='Admin permission required to delete tags.')
     with Session(engine) as session:
-        if current_user.permission != 'admin':
-            raise HTTPException(status_code=403, detail='Admin permission required to delete tags.')
         if not (tag := session.get(WikiTag, name)):
             raise HTTPException(status_code=404, detail='Cannot find tag to delete.')
 
+        # Remove this tag from every document that references it
+        for doc in session.exec(select(WikiDoc)).all():
+            new_tags = [t for t in (doc.tags or []) if (t.get('name') if isinstance(t, dict) else getattr(t, 'name', None)) != name]
+            if len(new_tags) != len(doc.tags or []):
+                doc.tags = new_tags
+                session.add(doc)
+
         session.delete(tag)
         session.commit()
+        logger.info('tag deleted: %s by %s', name, current_user.username)
         return {'message': f'The tag named {name} has been deleted.'}
     
 # Get document versions
@@ -330,6 +462,8 @@ async def get_categories():
 # Create category
 @app.post('/categories')
 async def create_category(category_in: WikiCategoryCreate, current_user: WikiUser = Depends(get_current_user)):
+    if current_user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Login required to create a category.')
     with Session(engine) as session:
         if session.get(WikiCategory, category_in.name):
             raise HTTPException(status_code=400, detail='Category name already exists.')
@@ -338,6 +472,7 @@ async def create_category(category_in: WikiCategoryCreate, current_user: WikiUse
         session.add(category)
         session.commit()
         session.refresh(category)
+        logger.info('category created: %s by %s', category_in.name, current_user.username)
         return {'message': f'The category named {category_in.name} has been created.'}
 
 # Get category
@@ -352,10 +487,21 @@ async def get_category(name: str):
 # Delete category
 @app.delete('/categories/{name}')
 async def delete_category(name: str, current_user: WikiUser = Depends(get_current_user)):
+    if current_user is None or current_user.permission != 'admin':
+        raise HTTPException(status_code=403, detail='Admin permission required to delete categories.')
     with Session(engine) as session:
         if not (category := session.get(WikiCategory, name)):
             raise HTTPException(status_code=404, detail='Cannot find category to delete.')
 
+        # Reject if any document still uses this category
+        in_use = sum(
+            1 for doc in session.exec(select(WikiDoc)).all()
+            if (doc.category.get('name') if isinstance(doc.category, dict) else getattr(doc.category, 'name', None)) == name
+        )
+        if in_use:
+            raise HTTPException(status_code=409, detail=f"Category '{name}' is in use by {in_use} document(s). Move them to another category first.")
+
         session.delete(category)
         session.commit()
+        logger.info('category deleted: %s by %s', name, current_user.username)
         return {'message': f'The category named {name} has been deleted.'}

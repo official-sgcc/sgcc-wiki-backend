@@ -1,6 +1,7 @@
 import bcrypt
 import jwt
 import os
+import re
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException, status
@@ -10,6 +11,23 @@ load_dotenv()
 JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'testsecretkey')
 JWT_ALGORITHM = os.getenv('JWT_ALGORITHM', 'HS256')
 JWT_TOKEN_EXPIRE_MINUTES = int(os.getenv('JWT_TOKEN_EXPIRE_MINUTES', 180))
+
+USERNAME_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{3,32}$')
+
+def validate_username(username: str):
+    if not USERNAME_PATTERN.match(username):
+        raise HTTPException(
+            status_code=400,
+            detail='Username must be 3-32 characters and contain only letters, numbers, underscores, or hyphens.'
+        )
+
+def validate_password(password: str):
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail='Password must be at least 8 characters long.')
+    if not re.search(r'[A-Za-z]', password):
+        raise HTTPException(status_code=400, detail='Password must contain at least one letter.')
+    if not re.search(r'\d', password):
+        raise HTTPException(status_code=400, detail='Password must contain at least one digit.')
 
 def hash_password(plain_password: str) -> str:
     plain_password_bytes = plain_password.encode('utf-8')
