@@ -1,3 +1,7 @@
+import importlib
+import sqlite3
+
+
 def test_register_and_login(client):
     resp = client.post('/register', json={'username': 'alice123', 'password': 'Password1'})
     assert resp.status_code == 200
@@ -42,6 +46,34 @@ def test_login_unknown_user_returns_same_message_as_wrong_password(client):
     assert miss_user.status_code == 401
     assert wrong_pw.status_code == 401
     assert miss_user.json()['detail'] == wrong_pw.json()['detail']
+
+
+def test_register_works_with_legacy_not_null_email_column(tmp_path, monkeypatch):
+    db_path = tmp_path / 'legacy.db'
+    monkeypatch.setenv('DB_PATH', str(db_path))
+    monkeypatch.setenv('ADMIN_USERNAME', '')
+    monkeypatch.setenv('ADMIN_PASSWORD', '')
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            'CREATE TABLE wikiuser ('
+            'username TEXT PRIMARY KEY, '
+            'password TEXT NOT NULL, '
+            'permission TEXT NOT NULL, '
+            'bio TEXT NOT NULL, '
+            'email TEXT NOT NULL'
+            ')'
+        )
+        conn.commit()
+
+    import main
+    importlib.reload(main)
+
+    from fastapi.testclient import TestClient
+
+    with TestClient(main.app) as client:
+        resp = client.post('/register', json={'username': 'alice123', 'password': 'Password1'})
+        assert resp.status_code == 200
 
 
 def test_get_user_info_hides_email_to_others(client, auth_headers):
