@@ -143,15 +143,25 @@ def check_document_permission(session: Session, current_user: WikiUser, title: s
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f'Requires document-specific \'{action}\' permission')
 
 # Validate that referenced tags/category exist in DB
-def validate_tags_and_category(session: Session, tags, category):
+def validate_tags_and_category(session: Session, tags, category, current_user=None, create_missing_tags=False):
     if category is not None:
         cat_name = category.name if hasattr(category, 'name') else category.get('name')
         if not session.get(WikiCategory, cat_name):
             raise HTTPException(status_code=400, detail=f"Category '{cat_name}' does not exist.")
+
     for tag in tags or []:
         tag_name = tag.name if hasattr(tag, 'name') else tag.get('name')
-        if not session.get(WikiTag, tag_name):
+        if session.get(WikiTag, tag_name):
+            continue
+        if not create_missing_tags:
             raise HTTPException(status_code=400, detail=f"Tag '{tag_name}' does not exist.")
+        if current_user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Login required to create a tag.')
+
+        new_tag = WikiTag(name=tag_name)
+        session.add(new_tag)
+        session.commit()
+        session.refresh(new_tag)
 
 # Get documents
 @app.get('/documents')
@@ -177,7 +187,7 @@ async def create_document(doc_in: WikiDocCreate, current_user: WikiUser = Depend
         if session.get(WikiDoc, doc_in.title):
             raise HTTPException(status_code=400, detail='There is already a document with the same name.')
 
-        validate_tags_and_category(session, doc_in.tags, doc_in.category)
+        validate_tags_and_category(session, doc_in.tags, doc_in.category, current_user=current_user, create_missing_tags=True)
 
         doc = WikiDoc(**doc_in.model_dump())
         doc.created_by = current_user.username
@@ -227,7 +237,7 @@ async def update_document(title: str, update_data: WikiDocUpdate, current_user: 
 
         check_document_permission(session, current_user, title, 'update')
 
-        validate_tags_and_category(session, update_data.tags, update_data.category)
+        validate_tags_and_category(session, update_data.tags, update_data.category, current_user=current_user, create_missing_tags=True)
 
         for _ in range(3):
             if update_data.content is not None:

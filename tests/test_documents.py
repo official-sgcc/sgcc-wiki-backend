@@ -30,7 +30,7 @@ def test_create_and_get_document(client, auth_headers):
     assert resp.json()['content'] == 'hello'
 
 
-def test_create_document_rejects_missing_tag(client, auth_headers):
+def test_create_document_auto_creates_missing_tag(client, auth_headers):
     headers, _ = auth_headers('alice123')
     client.post('/categories', json={'name': 'General'}, headers=headers)
 
@@ -40,7 +40,30 @@ def test_create_document_rejects_missing_tag(client, auth_headers):
         'category': {'name': 'General'},
         'tags': [{'name': 'NonExisting'}],
     }, headers=headers)
-    assert resp.status_code == 400
+    assert resp.status_code == 200
+
+    tags = client.get('/tags').json()
+    assert any(tag['name'] == 'NonExisting' for tag in tags)
+
+
+def test_update_document_auto_creates_missing_tag(client, auth_headers):
+    headers, _ = auth_headers('alice123')
+    client.post('/categories', json={'name': 'General'}, headers=headers)
+    client.post('/documents', json={
+        'title': 'DocY',
+        'content': 'before',
+        'category': {'name': 'General'},
+        'tags': [],
+    }, headers=headers)
+
+    resp = client.put('/documents/DocY', json={
+        'content': 'after',
+        'tags': [{'name': 'NewTag'}],
+    }, headers=headers)
+    assert resp.status_code == 200
+
+    tags = client.get('/tags').json()
+    assert any(tag['name'] == 'NewTag' for tag in tags)
 
 
 def test_create_document_rejects_missing_category(client, auth_headers):
