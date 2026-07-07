@@ -144,7 +144,7 @@ pytest
     - title - 문서 제목
     - content - 본문
     - category - 카테고리 (이미 존재해야 함)
-    - tags - 태그 리스트 (각 태그가 이미 존재해야 함)
+    - tags - 태그 리스트 (로그인 상태일 시 존재하지 않는 태그는 생성)
   - response:
     - 문서 생성 메시지
 
@@ -258,13 +258,14 @@ pytest
 
 - `GET /categories` - 카테고리 전체 목록 조회
   - response:
-    - 카테고리 전체 목록
+    - 카테고리 전체 목록(parent: 상위 카테고리, children: 하위 카테고리)
 
 - `POST /categories` - 카테고리 생성
   - headers:
     - jwt 토큰
   - request body:
     - name - 카테고리 이름
+    - parent - 상위 카테고리
   - response:
     - 카테고리 생성 완료 메시지
 
@@ -274,7 +275,7 @@ pytest
   - response:
     - 특정 카테고리 정보
 
-- `DELETE /categories/{name}` - 카테고리 삭제
+- `DELETE /categories/{name}` - 카테고리 삭제(하위 카테고리 포함)
   - parameter:
     - name - 삭제할 카테고리 이름
   - headers:

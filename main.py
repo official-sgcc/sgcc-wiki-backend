@@ -10,7 +10,7 @@ from schemas.wiki_doc import WikiDoc, WikiDocCreate, WikiDocUpdate, WikiDocVersi
 from schemas.wiki_user import WikiUser, UserIdAndPassword
 from schemas.permissions import Permissions
 from schemas.tags import WikiTag, WikiTagCreate
-from schemas.categories import WikiCategory, WikiCategoryCreate
+from schemas.categories import WikiCategory, WikiCategoryCreate, WikiCategoryNode
 from datetime import datetime, timezone
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -470,11 +470,20 @@ async def get_document_update_diff(title: str, version_number: int):
         dmp.diff_cleanupSemantic(diffs)
         return diffs
     
-# Get all categories
+# Get all categories with hierarchy
 @app.get('/categories')
 async def get_categories():
     with Session(engine) as session:
-        return session.exec(select(WikiCategory)).all()
+        all_cats = session.exec(select(WikiCategory)).all()
+        cat_map = {cat.name: cat for cat in all_cats}
+        
+        def build_node(cat_name: str) -> WikiCategoryNode:
+            cat = cat_map[cat_name]
+            children = [build_node(c.name) for c in all_cats if c.parent == cat_name]
+            return WikiCategoryNode(name=cat.name, parent=cat.parent, children=children)
+        
+        root_cats = [cat for cat in all_cats if cat.parent is None]
+        return [build_node(cat.name) for cat in root_cats]
 
 # Create category
 @app.post('/categories')
@@ -484,6 +493,12 @@ async def create_category(category_in: WikiCategoryCreate, current_user: WikiUse
     with Session(engine) as session:
         if session.get(WikiCategory, category_in.name):
             raise HTTPException(status_code=400, detail='Category name already exists.')
+        
+        if category_in.parent is not None:
+            if category_in.parent == category_in.name:
+                raise HTTPException(status_code=400, detail='Category cannot be its own parent.')
+            if not session.get(WikiCategory, category_in.parent):
+                raise HTTPException(status_code=400, detail=f'Parent category \'{category_in.parent}\' does not exist.')
         
         category = WikiCategory(**category_in.model_dump())
         session.add(category)
@@ -499,7 +514,16 @@ async def get_category(name: str):
         category = session.get(WikiCategory, name)
         if not category:
             raise HTTPException(status_code=404, detail='Cannot find the corresponding category.')
-        return category
+        
+        all_cats = session.exec(select(WikiCategory)).all()
+        cat_map = {cat.name: cat for cat in all_cats}
+        
+        def build_node(cat_name: str) -> WikiCategoryNode:
+            cat = cat_map[cat_name]
+            children = [build_node(c.name) for c in all_cats if c.parent == cat_name]
+            return WikiCategoryNode(name=cat.name, parent=cat.parent, children=children)
+        
+        return build_node(name)
 
 # Delete category
 @app.delete('/categories/{name}')
@@ -510,15 +534,29 @@ async def delete_category(name: str, current_user: WikiUser = Depends(get_curren
         if not (category := session.get(WikiCategory, name)):
             raise HTTPException(status_code=404, detail='Cannot find category to delete.')
 
-        # Reject if any document still uses this category
+        # Reject if any document still uses this category or its subcategories
+        def get_all_descendant_names(cat_name: str) -> set:
+            descendants = {cat_name}
+            for cat in session.exec(select(WikiCategory)).all():
+                if cat.parent == cat_name:
+                    descendants.update(get_all_descendant_names(cat.name))
+            return descendants
+        
+        all_descendants = get_all_descendant_names(name)
         in_use = sum(
             1 for doc in session.exec(select(WikiDoc)).all()
-            if (doc.category.get('name') if isinstance(doc.category, dict) else getattr(doc.category, 'name', None)) == name
+            if (doc.category.get('name') if isinstance(doc.category, dict) else getattr(doc.category, 'name', None)) in all_descendants
         )
         if in_use:
-            raise HTTPException(status_code=409, detail=f"Category '{name}' is in use by {in_use} document(s). Move them to another category first.")
+            raise HTTPException(status_code=409, detail=f"Category '{name}' or its subcategories are in use by {in_use} document(s). Move them to another category first.")
 
-        session.delete(category)
+        # Recursively delete all subcategories
+        def delete_recursive(cat_name: str):
+            for child_cat in session.exec(select(WikiCategory).where(WikiCategory.parent == cat_name)).all():
+                delete_recursive(child_cat.name)
+            session.delete(session.get(WikiCategory, cat_name))
+        
+        delete_recursive(name)
         session.commit()
-        logger.info('category deleted: %s by %s', name, current_user.username)
-        return {'message': f'The category named {name} has been deleted.'}
+        logger.info('category deleted (with subcategories): %s by %s', name, current_user.username)
+        return {'message': f'The category named {name} and its subcategories have been deleted.'}
