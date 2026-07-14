@@ -23,7 +23,7 @@ from schemas.wiki_user import (
 )
 from schemas.permissions import Permissions
 from schemas.tags import WikiTag, WikiTagCreate
-from schemas.categories import WikiCategory, WikiCategoryCreate
+from schemas.categories import WikiCategory, WikiCategoryCreate, WikiCategoryNode
 from datetime import datetime, timezone
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -284,9 +284,12 @@ def validate_tags_and_category(session: Session, tags, category):
         cat_name = category.name if hasattr(category, 'name') else category.get('name')
         if not session.get(WikiCategory, cat_name):
             raise HTTPException(status_code=400, detail=f"Category '{cat_name}' does not exist.")
+
     for tag in tags or []:
         tag_name = tag.name if hasattr(tag, 'name') else tag.get('name')
-        if not session.get(WikiTag, tag_name):
+        if session.get(WikiTag, tag_name):
+            continue
+        if not create_missing_tags:
             raise HTTPException(status_code=400, detail=f"Tag '{tag_name}' does not exist.")
 
 @app.get('/documents')
@@ -339,7 +342,7 @@ async def create_document(doc_in: WikiDocCreate, current_user: WikiUser = Depend
         if session.get(WikiDoc, doc_in.title):
             raise HTTPException(status_code=400, detail='There is already a document with the same name.')
 
-        validate_tags_and_category(session, doc_in.tags, doc_in.category)
+        validate_tags_and_category(session, doc_in.tags, doc_in.category, current_user=current_user, create_missing_tags=True)
 
         doc = WikiDoc(**doc_in.model_dump())
         doc.created_by = current_user.username
@@ -420,7 +423,7 @@ async def update_document(title: str, update_data: WikiDocUpdate, current_user: 
 
         check_document_permission(session, current_user, title, 'update')
 
-        validate_tags_and_category(session, update_data.tags, update_data.category)
+        validate_tags_and_category(session, update_data.tags, update_data.category, current_user=current_user, create_missing_tags=True)
 
         for _ in range(3):
             if update_data.content is not None:
@@ -1152,7 +1155,16 @@ async def get_categories():
         list[WikiCategory]: 등록된 모든 카테고리.
     """
     with Session(engine) as session:
-        return session.exec(select(WikiCategory)).all()
+        all_cats = session.exec(select(WikiCategory)).all()
+        cat_map = {cat.name: cat for cat in all_cats}
+        
+        def build_node(cat_name: str) -> WikiCategoryNode:
+            cat = cat_map[cat_name]
+            children = [build_node(c.name) for c in all_cats if c.parent == cat_name]
+            return WikiCategoryNode(name=cat.name, parent=cat.parent, children=children)
+        
+        root_cats = [cat for cat in all_cats if cat.parent is None]
+        return [build_node(cat.name) for cat in root_cats]
 
 @app.post('/categories')
 async def create_category(category_in: WikiCategoryCreate, current_user: WikiUser = Depends(get_current_user)):
@@ -1174,7 +1186,7 @@ async def create_category(category_in: WikiCategoryCreate, current_user: WikiUse
     with Session(engine) as session:
         if session.get(WikiCategory, category_in.name):
             raise HTTPException(status_code=400, detail='Category name already exists.')
-
+        
         category = WikiCategory(**category_in.model_dump())
         session.add(category)
         session.commit()
@@ -1201,6 +1213,7 @@ async def get_category(name: str):
             raise HTTPException(status_code=404, detail='Cannot find the corresponding category.')
         return category
 
+# Delete category
 @app.delete('/categories/{name}')
 async def delete_category(name: str, current_user: WikiUser = Depends(get_current_user)):
     """카테고리를 삭제한다. (admin 전용)
@@ -1226,15 +1239,29 @@ async def delete_category(name: str, current_user: WikiUser = Depends(get_curren
         if not (category := session.get(WikiCategory, name)):
             raise HTTPException(status_code=404, detail='Cannot find category to delete.')
 
-        # Reject if any document still uses this category
+        # Reject if any document still uses this category or its subcategories
+        def get_all_descendant_names(cat_name: str) -> set:
+            descendants = {cat_name}
+            for cat in session.exec(select(WikiCategory)).all():
+                if cat.parent == cat_name:
+                    descendants.update(get_all_descendant_names(cat.name))
+            return descendants
+        
+        all_descendants = get_all_descendant_names(name)
         in_use = sum(
             1 for doc in session.exec(select(WikiDoc)).all()
-            if (doc.category.get('name') if isinstance(doc.category, dict) else getattr(doc.category, 'name', None)) == name
+            if (doc.category.get('name') if isinstance(doc.category, dict) else getattr(doc.category, 'name', None)) in all_descendants
         )
         if in_use:
-            raise HTTPException(status_code=409, detail=f"Category '{name}' is in use by {in_use} document(s). Move them to another category first.")
+            raise HTTPException(status_code=409, detail=f"Category '{name}' or its subcategories are in use by {in_use} document(s). Move them to another category first.")
 
-        session.delete(category)
+        # Recursively delete all subcategories
+        def delete_recursive(cat_name: str):
+            for child_cat in session.exec(select(WikiCategory).where(WikiCategory.parent == cat_name)).all():
+                delete_recursive(child_cat.name)
+            session.delete(session.get(WikiCategory, cat_name))
+        
+        delete_recursive(name)
         session.commit()
-        logger.info('category deleted: %s by %s', name, current_user.username)
-        return {'message': f'The category named {name} has been deleted.'}
+        logger.info('category deleted (with subcategories): %s by %s', name, current_user.username)
+        return {'message': f'The category named {name} and its subcategories have been deleted.'}
