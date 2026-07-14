@@ -1222,9 +1222,23 @@ async def get_category(name: str):
         
         return build_node(name)
     
-# Update category
 @app.put('/categories/{name}')
 async def update_category(name: str, update_data: WikiCategoryUpdate, current_user: WikiUser = Depends(get_current_user)):
+    """기존 카테고리를 수정한다. (admin 전용)
+
+    Args:
+        name: 수정할 카테고리 이름.
+        update_data: 변경할 필드들.
+        current_user: 인증 사용자. admin만 가능.
+
+    Returns:
+        dict: `{'message': '...has been updated.'}`
+
+    Raises:
+        HTTPException 403: admin이 아니거나 비로그인 상태.
+        HTTPException 404: 수정할 카테고리가 없을 때.
+        HTTPException 400: 부모가 자기 자신이거나 순환 참조가 발생할 때.
+    """
     if current_user is None or current_user.permission != 'admin':
         raise HTTPException(status_code=403, detail='Admin permission required to update categories.')
     with Session(engine) as session:
