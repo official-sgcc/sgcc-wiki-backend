@@ -92,3 +92,42 @@ def test_delete_unused_category_succeeds(client, admin_headers):
     client.post('/categories', json={'name': 'Orphan'}, headers=admin)
     resp = client.delete('/categories/Orphan', headers=admin)
     assert resp.status_code == 200
+
+
+def test_get_documents_by_category(client, auth_headers):
+    headers, _ = auth_headers('alice123')
+    client.post('/categories', json={'name': 'Parent'}, headers=headers)
+    client.post('/categories', json={'name': 'Child', 'parent': 'Parent'}, headers=headers)
+    for title, cat in [('P1', 'Parent'), ('P2', 'Parent'), ('C1', 'Child')]:
+        client.post('/documents', json={
+            'title': title,
+            'content': 'hello',
+            'category': {'name': cat},
+            'tags': [],
+        }, headers=headers)
+
+    # 기본: 정확히 그 카테고리의 문서만 (하위 Child의 C1은 제외)
+    resp = client.get('/categories/Parent/documents')
+    assert resp.status_code == 200
+    assert sorted(d['title'] for d in resp.json()) == ['P1', 'P2']
+
+    resp = client.get('/categories/Nope/documents')
+    assert resp.status_code == 404
+
+
+def test_get_documents_by_category_recursive(client, auth_headers):
+    headers, _ = auth_headers('alice123')
+    client.post('/categories', json={'name': 'Parent'}, headers=headers)
+    client.post('/categories', json={'name': 'Child', 'parent': 'Parent'}, headers=headers)
+    for title, cat in [('P1', 'Parent'), ('C1', 'Child')]:
+        client.post('/documents', json={
+            'title': title,
+            'content': 'hello',
+            'category': {'name': cat},
+            'tags': [],
+        }, headers=headers)
+
+    # recursive=true: 하위 카테고리(Child) 문서까지 포함
+    resp = client.get('/categories/Parent/documents', params={'recursive': 'true'})
+    assert resp.status_code == 200
+    assert sorted(d['title'] for d in resp.json()) == ['C1', 'P1']

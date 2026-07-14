@@ -362,7 +362,17 @@ pytest
   - parameter:
     - name - 카테고리 이름
   - response:
-    - 특정 카테고리 정보
+    - 특정 카테고리 정보 (`name`, `parent`, `children` — **children은 하위 카테고리**이며 문서가 아님)
+
+- `GET /categories/{name}/documents` - 해당 카테고리에 속한 문서 목록 조회
+  - parameter:
+    - name - 카테고리 이름 (존재하지 않으면 404)
+    - recursive - `true`면 하위 카테고리(자식·손자…) 문서까지 포함 (선택, 기본 false)
+    - limit - 한 번에 가져올 개수 (선택, 미지정 시 전체)
+    - offset - 건너뛸 개수 (선택, 기본 0)
+  - response:
+    - 카테고리에 속한 문서 목록 (없으면 빈 리스트)
+  - `GET /categories/{name}`의 `children`(하위 카테고리)과 달리, 이쪽은 카테고리에 담긴 '문서'를 반환합니다.
 
 - `PUT /categories/{name}` - 카테고리 수정
   - parameter:

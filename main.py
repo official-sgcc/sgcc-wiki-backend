@@ -1233,7 +1233,52 @@ async def get_category(name: str):
             return WikiCategoryNode(name=cat.name, parent=cat.parent, children=children)
         
         return build_node(name)
-    
+
+@app.get('/categories/{name}/documents')
+async def get_documents_by_category(name: str, recursive: bool = False, limit: int | None = None, offset: int = 0):
+    """해당 카테고리에 속한 문서를 조회한다. (인증 불필요)
+
+    문서의 category(JSON)의 name이 대상과 일치하는 문서를 반환한다. 기본은 지정한
+    카테고리에 정확히 속한 문서만이며, recursive=true면 하위 카테고리(자식·손자…)에
+    속한 문서까지 포함한다. `children`(하위 카테고리)을 주는 GET /categories/{name}과
+    달리, 이쪽은 카테고리에 담긴 '문서'를 준다.
+
+    Args:
+        name: 대상 카테고리 이름. DB에 존재하지 않으면 404.
+        recursive: True면 하위 카테고리 문서까지 포함한다.
+        limit: 반환 최대 개수. None이면 제한 없음.
+        offset: 건너뛸 개수(limit이 있을 때만 적용).
+
+    Returns:
+        list[WikiDoc]: 카테고리에 속한 문서 목록(없으면 빈 리스트).
+
+    Raises:
+        HTTPException 404: 해당 카테고리가 없을 때.
+    """
+    with Session(engine) as session:
+        if not session.get(WikiCategory, name):
+            raise HTTPException(status_code=404, detail='Cannot find the corresponding category.')
+
+        if recursive:
+            all_cats = session.exec(select(WikiCategory)).all()
+            def get_all_descendant_names(cat_name: str) -> set:
+                descendants = {cat_name}
+                for cat in all_cats:
+                    if cat.parent == cat_name:
+                        descendants.update(get_all_descendant_names(cat.name))
+                return descendants
+            target_names = get_all_descendant_names(name)
+        else:
+            target_names = {name}
+
+        docs = [
+            d for d in session.exec(select(WikiDoc)).all()
+            if (d.category.get('name') if isinstance(d.category, dict) else getattr(d.category, 'name', None)) in target_names
+        ]
+        if limit is not None:
+            docs = docs[offset:offset + limit]
+        return docs
+
 @app.put('/categories/{name}')
 async def update_category(name: str, update_data: WikiCategoryUpdate, current_user: WikiUser = Depends(get_current_user)):
     """기존 카테고리를 수정한다. (admin 전용)
