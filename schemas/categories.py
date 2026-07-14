@@ -9,6 +9,9 @@ class WikiCategoryCreate(BaseModel):
     name: str
     parent: str | None = None
 
+class WikiCategoryUpdate(BaseModel):
+    parent: str | None = None
+
 class WikiCategoryNode(BaseModel):
     name: str
     parent: str | None

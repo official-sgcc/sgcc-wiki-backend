@@ -10,7 +10,7 @@ from schemas.wiki_doc import WikiDoc, WikiDocCreate, WikiDocUpdate, WikiDocVersi
 from schemas.wiki_user import WikiUser, UserIdAndPassword
 from schemas.permissions import Permissions
 from schemas.tags import WikiTag, WikiTagCreate
-from schemas.categories import WikiCategory, WikiCategoryCreate, WikiCategoryNode
+from schemas.categories import WikiCategory, WikiCategoryCreate, WikiCategoryNode, WikiCategoryUpdate
 from datetime import datetime, timezone
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -524,6 +524,48 @@ async def get_category(name: str):
             return WikiCategoryNode(name=cat.name, parent=cat.parent, children=children)
         
         return build_node(name)
+    
+# Update category
+@app.put('/categories/{name}')
+async def update_category(name: str, update_data: WikiCategoryUpdate, current_user: WikiUser = Depends(get_current_user)):
+    if current_user is None or current_user.permission != 'admin':
+        raise HTTPException(status_code=403, detail='Admin permission required to update categories.')
+    with Session(engine) as session:
+        def would_create_cycle(session, category_name: str, parent_name: str | None) -> bool:
+            if parent_name is None:
+                return False
+            if parent_name == category_name:
+                return True
+
+            current_name = parent_name
+            while current_name is not None:
+                current_category = session.get(WikiCategory, current_name)
+                if current_category is None:
+                    return False
+                if current_category.name == category_name:
+                    return True
+                current_name = current_category.parent
+
+            return False
+
+        if not (category := session.get(WikiCategory, name)):
+            raise HTTPException(status_code=404, detail='Cannot find the corresponding category.')
+
+        update_data_dict = update_data.model_dump(exclude_unset=True)
+        if 'parent' in update_data_dict:
+            parent_name = update_data_dict['parent']
+            if parent_name == name:
+                raise HTTPException(status_code=400, detail='Category cannot be its own parent.')
+            if parent_name is not None and not session.get(WikiCategory, parent_name):
+                raise HTTPException(status_code=400, detail=f'Parent category \'{parent_name}\' does not exist.')
+            if would_create_cycle(session, name, parent_name):
+                raise HTTPException(status_code=400, detail='Category cannot create a circular parent reference.')
+
+        for key, value in update_data_dict.items():
+            setattr(category, key, value)
+        session.commit()
+        session.refresh(category)
+        return {'message': f'The category named {name} has been updated.'}
 
 # Delete category
 @app.delete('/categories/{name}')

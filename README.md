@@ -275,6 +275,17 @@ pytest
   - response:
     - 특정 카테고리 정보
 
+- `PUT /categories/{name}` - 카테고리 수정
+  - parameter:
+    - name - 카테고리 이름
+  - headers:
+    - jwt 토큰 (admin 권한)
+  - request body:
+    - parent - 상위 카테고리
+  - response:
+    - 수정 완료 메시지
+  - 카테고리의 하위 노드를 상위 노드로 순환 참조할 수 없습니다.
+
 - `DELETE /categories/{name}` - 카테고리 삭제(하위 카테고리 포함)
   - parameter:
     - name - 삭제할 카테고리 이름
