@@ -23,6 +23,8 @@ TOTP_ISSUER = os.getenv('TOTP_ISSUER', 'SGCC Wiki')
 USERNAME_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{3,32}$')
 EMAIL_PATTERN = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
+DUMMY_PASSWORD_HASH = '$2b$12$Iuk3jgqSiT6nHyHj.u6sXOWkTFl/udS.Zh7/QdHqqKwvCZJqmqD12'
+
 def validate_username(username: str):
     if not USERNAME_PATTERN.match(username):
         raise HTTPException(

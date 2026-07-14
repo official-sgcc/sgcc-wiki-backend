@@ -14,6 +14,7 @@ from login_utils import (
     create_password_reset_token, read_reset_token_subject, verify_password_reset_token,
     create_email_verification_token, verify_email_verification_token,
     generate_totp_secret, totp_provisioning_uri, matched_totp_step,
+    DUMMY_PASSWORD_HASH,
 )
 from schemas.wiki_doc import WikiDoc, WikiDocCreate, WikiDocUpdate, WikiDocVersion
 from schemas.wiki_user import (
@@ -628,7 +629,8 @@ async def login_user(request: Request, user_info: UserIdAndPassword):
     """자격 증명을 검증하고 JWT를 발급한다. (rate limit: IP당 분당 5회)
 
     보안상 "아이디 없음"과 "비밀번호 불일치"를 구분하지 않고 동일한 401 메시지를
-    반환한다(username enumeration 방지). 이 메시지를 분리하지 말 것.
+    반환한다(username enumeration 방지). 이 메시지를 분리하지 말 것. 또한 아이디가 없을
+    때도 bcrypt 검증을 수행해 응답 시간을 일정하게 유지하여 timing attack을 방지한다.
 
     2단계 인증: 대상 사용자가 2FA를 켜 두었다면(totp_enabled) 이 단계에서는 진짜
     토큰을 주지 않고 `{'mfa_required': True, 'mfa_token': ...}`를 반환한다. 프론트는
@@ -649,7 +651,8 @@ async def login_user(request: Request, user_info: UserIdAndPassword):
     """
     with Session(engine) as session:
         user = session.get(WikiUser, user_info.username)
-        if not user or not verify_password(user_info.password, user.password):
+        password_valid = verify_password(user_info.password, user.password) if user else verify_password(user_info.password, DUMMY_PASSWORD_HASH)
+        if not user or not password_valid:
             logger.warning('login failed for username: %s', user_info.username)
             raise HTTPException(status_code=401, detail='Invalid username or password.')
 
