@@ -48,11 +48,15 @@ def test_login_unknown_user_returns_same_message_as_wrong_password(client):
     assert miss_user.json()['detail'] == wrong_pw.json()['detail']
 
 
-def test_register_works_with_legacy_not_null_email_column(tmp_path, monkeypatch):
+def test_register_works_with_migrated_legacy_schema(tmp_path, monkeypatch):
+    # 과거 email이 NOT NULL이던 구버전 DB를 README의 수동 마이그레이션으로 따라잡은
+    # 상태(email nullable + 신규 컬럼 추가)를 재현한다. create_all은 기존 테이블을
+    # 건드리지 않으므로, 이 마이그레이션이 선행돼야 신규 가입(email=None)이 된다.
     db_path = tmp_path / 'legacy.db'
     monkeypatch.setenv('DB_PATH', str(db_path))
     monkeypatch.setenv('ADMIN_USERNAME', '')
     monkeypatch.setenv('ADMIN_PASSWORD', '')
+    monkeypatch.setenv('JWT_SECRET_KEY', 'testsecretkey')
 
     with sqlite3.connect(db_path) as conn:
         conn.execute(
@@ -61,7 +65,11 @@ def test_register_works_with_legacy_not_null_email_column(tmp_path, monkeypatch)
             'password TEXT NOT NULL, '
             'permission TEXT NOT NULL, '
             'bio TEXT NOT NULL, '
-            'email TEXT NOT NULL'
+            'email TEXT, '
+            'email_verified BOOLEAN NOT NULL DEFAULT 0, '
+            'totp_secret VARCHAR, '
+            'totp_enabled BOOLEAN NOT NULL DEFAULT 0, '
+            'totp_last_step INTEGER'
             ')'
         )
         conn.commit()

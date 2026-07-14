@@ -456,6 +456,33 @@ ALTER TABLE wikiuser ADD COLUMN totp_last_step INTEGER;
 ALTER TABLE wikiuser ADD COLUMN email_verified BOOLEAN NOT NULL DEFAULT 0;
 ```
 
+#### 아주 오래된 wiki.db의 `email` NOT NULL 제거 (이메일 선택 등록 도입 시)
+
+과거 `email`이 필수(`NOT NULL`)이던 시절의 DB라면, 이제 이메일 없이 가입(`email=NULL`)이 안 됩니다. SQLite는 컬럼의 `NOT NULL` 제약을 `ALTER`로 직접 못 떼므로, 백업 후 테이블을 재빌드하세요(다른 연결이 없을 때 실행). **위의 2FA·이메일 인증 컬럼 추가를 먼저 끝낸 상태**를 전제로 합니다:
+
+```sql
+PRAGMA foreign_keys=off;
+BEGIN;
+ALTER TABLE wikiuser RENAME TO wikiuser_legacy;
+CREATE TABLE wikiuser (
+    username VARCHAR NOT NULL PRIMARY KEY,
+    password VARCHAR NOT NULL,
+    permission VARCHAR NOT NULL,
+    bio VARCHAR NOT NULL,
+    email VARCHAR,
+    email_verified BOOLEAN NOT NULL DEFAULT 0,
+    totp_secret VARCHAR,
+    totp_enabled BOOLEAN NOT NULL DEFAULT 0,
+    totp_last_step INTEGER
+);
+INSERT INTO wikiuser (username, password, permission, bio, email, email_verified, totp_secret, totp_enabled, totp_last_step)
+    SELECT username, password, permission, bio, email, email_verified, totp_secret, totp_enabled, totp_last_step FROM wikiuser_legacy;
+DROP TABLE wikiuser_legacy;
+CREATE UNIQUE INDEX ix_wikiuser_email ON wikiuser (email);
+COMMIT;
+PRAGMA foreign_keys=on;
+```
+
 추후 데이터가 의미 있게 누적되면 Alembic 같은 마이그레이션 도구 도입을 검토하세요.
 
 ### CORS
