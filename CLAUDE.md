@@ -23,7 +23,7 @@
 
 ```bash
 # 의존성 설치 (런타임)
-pip install fastapi sqlmodel bcrypt pyjwt python-dotenv uvicorn apscheduler diff_match_patch slowapi
+pip install fastapi sqlmodel bcrypt pyjwt python-dotenv uvicorn apscheduler diff_match_patch slowapi pyotp
 
 # 의존성 설치 (테스트)
 pip install pytest httpx
@@ -57,6 +57,16 @@ python3 -m py_compile main.py login_utils.py schemas/*.py
 - 호환: `auth: <token>` (구버전 프론트 호환용)
 
 **둘 다 살려둘 것.** 프론트엔드를 깨지 않기 위함. CORS `allow_headers`에도 둘 다 등록되어야 함.
+
+### JWT 토큰 종류 구분 (`purpose` 클레임)
+
+같은 `JWT_SECRET_KEY`로 서명되는 토큰이 여러 종류(access / mfa / email_verify 등)라, 각 토큰은 `purpose` 클레임으로 용도를 구분한다. **정식 세션 토큰(`create_jwt_token`)은 `purpose='access'`를 담고, `verify_jwt_token`은 `purpose == 'access'`를 반드시 확인한다.** 이 검사를 빼면 2FA 1단계의 `mfa_token`이나 이메일 인증 토큰이 세션 토큰으로 통과해 **2FA가 우회**된다(실제로 있었던 취약점). 새 토큰 종류를 추가할 때도 고유한 `purpose`를 부여하고 해당 검증 함수에서 확인할 것.
+
+> 이 규칙 도입 시점 이전에 발급된 access 토큰에는 `purpose`가 없어 **전부 무효화**된다(사용자 재로그인 필요). 서명 키를 바꾸는 것과 동일한 영향이므로 배포 노트에 남길 것.
+
+### 2FA(TOTP) 재사용 방지
+
+TOTP 코드는 `matched_totp_step`이 매칭된 타임스텝을 반환하고, `WikiUser.totp_last_step`에 마지막 성공 스텝을 저장해 **같은 코드 재사용(replay)을 막는다**(login/2fa·disable에서 `step > totp_last_step` 강제). `/2fa/enable`은 소유 증명일 뿐이라 스텝을 소비하지 않는다(설정 직후 같은 창에서의 정상 로그인 유지). bool만 반환하는 단순 `verify`로 회귀시키지 말 것.
 
 ### 스키마 변경
 

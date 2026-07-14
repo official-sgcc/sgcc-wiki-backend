@@ -45,6 +45,28 @@ def test_delete_tag_cascades_from_documents(client, auth_headers, admin_headers)
     assert 'Python' not in tag_names
 
 
+def test_get_documents_by_tag(client, auth_headers):
+    headers, _ = auth_headers('alice123')
+    client.post('/tags', json={'name': 'Python'}, headers=headers)
+    client.post('/tags', json={'name': 'Rust'}, headers=headers)
+    client.post('/categories', json={'name': 'General'}, headers=headers)
+    for title, tags in [('Doc1', ['Python']), ('Doc2', ['Python', 'Rust']), ('Doc3', ['Rust'])]:
+        client.post('/documents', json={
+            'title': title,
+            'content': 'hello',
+            'category': {'name': 'General'},
+            'tags': [{'name': t} for t in tags],
+        }, headers=headers)
+
+    resp = client.get('/tags/Python/documents')
+    assert resp.status_code == 200
+    titles = sorted(d['title'] for d in resp.json())
+    assert titles == ['Doc1', 'Doc2']
+
+    resp = client.get('/tags/Nope/documents')
+    assert resp.status_code == 404
+
+
 def test_create_category_requires_auth(client):
     resp = client.post('/categories', json={'name': 'General'})
     assert resp.status_code == 401
