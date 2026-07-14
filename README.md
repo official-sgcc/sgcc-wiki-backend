@@ -324,11 +324,15 @@ pytest
   - response:
     - 태그 생성 완료 메시지
 
-- `GET /tags/{name}` - 특정 태그 정보 조회
+- `GET /tags/{name}/documents` - 해당 태그가 달린 문서 목록 조회
   - parameter:
-    - name - 태그 이름
+    - name - 태그 이름 (존재하지 않으면 404)
+    - limit - 한 번에 가져올 개수 (선택, 미지정 시 전체)
+    - offset - 건너뛸 개수 (선택, 기본 0)
   - response:
-    - 특정 태그 정보
+    - 태그가 달린 문서 목록 (없으면 빈 리스트)
+  - 태그명 정확 일치 매칭입니다 (`Python` 조회 시 `PythonDev` 문서는 제외).
+  - **변경**: 기존 `GET /tags/{name}`(태그 단건 조회)를 대체합니다.
 
 - `DELETE /tags/{name}` - 태그 삭제
   - parameter:
