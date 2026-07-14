@@ -267,19 +267,26 @@ def check_document_permission(session: Session, current_user: WikiUser, title: s
     if not allowed or current_user_permission not in allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f'Requires document-specific \'{action}\' permission')
 
-def validate_tags_and_category(session: Session, tags, category):
+def validate_tags_and_category(session: Session, tags, category, current_user=None, create_missing_tags=False):
     """문서에 지정된 태그·카테고리가 DB에 실제로 존재하는지 검증한다.
 
     문서 생성/수정 시 존재하지 않는 태그·카테고리 참조를 막기 위한 가드.
     입력은 pydantic 모델(.name 속성) 또는 dict({'name': ...}) 둘 다 허용한다.
 
+    태그가 없을 때의 동작은 create_missing_tags로 갈린다. 로그인 사용자가 문서를
+    만들며 create_missing_tags=True를 주면 없는 태그를 그 자리에서 생성한다(세션에
+    add만 하고 커밋은 호출자 몫). 그 외에는 400으로 거부한다. 카테고리는 항상 존재를
+    요구한다(자동 생성 없음).
+
     Args:
         session: 활성 DB 세션.
         tags: WikiTag 유사 객체들의 리스트(또는 None).
         category: WikiCategory 유사 객체(또는 None). None이면 카테고리 검사를 건너뛴다.
+        current_user: 인증 사용자. None(비로그인)이면 태그 자동 생성을 하지 않는다.
+        create_missing_tags: True이고 로그인 상태일 때만 없는 태그를 자동 생성한다.
 
     Raises:
-        HTTPException 400: 참조한 카테고리 또는 태그가 DB에 없을 때.
+        HTTPException 400: 카테고리가 없거나, 없는 태그를 자동 생성할 수 없을 때.
     """
     if category is not None:
         cat_name = category.name if hasattr(category, 'name') else category.get('name')
@@ -290,8 +297,10 @@ def validate_tags_and_category(session: Session, tags, category):
         tag_name = tag.name if hasattr(tag, 'name') else tag.get('name')
         if session.get(WikiTag, tag_name):
             continue
-        if not create_missing_tags:
-            raise HTTPException(status_code=400, detail=f"Tag '{tag_name}' does not exist.")
+        if create_missing_tags and current_user is not None:
+            session.add(WikiTag(name=tag_name))
+            continue
+        raise HTTPException(status_code=400, detail=f"Tag '{tag_name}' does not exist.")
 
 @app.get('/documents')
 async def get_documents(keyword: str | None = None, limit: int | None = None, offset: int = 0):
