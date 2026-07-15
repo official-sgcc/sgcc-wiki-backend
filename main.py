@@ -1042,13 +1042,16 @@ async def get_documents_by_tag(name: str, limit: int | None = None, offset: int 
         if not session.get(WikiTag, name):
             raise HTTPException(status_code=404, detail='Cannot find the corresponding tag.')
 
-        docs = session.exec(
-            select(WikiDoc).where(WikiDoc.tags.contains(f'"{name}"'))
-        ).all()
+        docs = session.exec(select(WikiDoc)).all()
+
         docs = [
             d for d in docs
-            if any((t.get('name') if isinstance(t, dict) else getattr(t, 'name', None)) == name for t in (d.tags or []))
+            if any(
+                (t.get("name") if isinstance(t, dict) else getattr(t, "name", None)) == name
+                for t in (d.tags or [])
+            )
         ]
+
         if limit is not None:
             docs = docs[offset:offset + limit]
         return docs
