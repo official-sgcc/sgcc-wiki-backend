@@ -1,6 +1,7 @@
 __pycache__/
 .env
 .vscode/settings.json
+.claude/
 db_backups/
 logs/
 .DS_Store
