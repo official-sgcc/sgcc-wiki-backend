@@ -10,6 +10,7 @@ class WikiCategoryCreate(BaseModel):
     parent: str | None = None
 
 class WikiCategoryUpdate(BaseModel):
+    name: str | None = None
     parent: str | None = None
 
 class WikiCategoryNode(BaseModel):
