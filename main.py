@@ -6,6 +6,7 @@ from email.message import EmailMessage
 from logging.handlers import RotatingFileHandler
 from fastapi import FastAPI, HTTPException, Depends, status, Header, Request
 from sqlmodel import create_engine, Session, select, SQLModel
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from login_utils import (
     hash_password, verify_password, create_jwt_token, verify_jwt_token,
@@ -1042,19 +1043,10 @@ async def get_documents_by_tag(name: str, limit: int | None = None, offset: int 
         if not session.get(WikiTag, name):
             raise HTTPException(status_code=404, detail='Cannot find the corresponding tag.')
 
-        docs = session.exec(select(WikiDoc)).all()
-
-        docs = [
-            d for d in docs
-            if any(
-                (t.get("name") if isinstance(t, dict) else getattr(t, "name", None)) == name
-                for t in (d.tags or [])
-            )
-        ]
-
+        statement = select(WikiDoc).where(WikiDoc.tags.contains([{'name': name}]))
         if limit is not None:
-            docs = docs[offset:offset + limit]
-        return docs
+            statement = statement.offset(offset).limit(limit)
+        return session.exec(statement).all()
 
 @app.delete('/tags/{name}')
 async def delete_tag(name: str, current_user: WikiUser = Depends(get_current_user)):
@@ -1271,16 +1263,14 @@ async def get_documents_by_category(name: str, recursive: bool = False, limit: i
                         descendants.update(get_all_descendant_names(cat.name))
                 return descendants
             target_names = get_all_descendant_names(name)
+            conditions = [WikiDoc.category.contains({'name': target}) for target in target_names]
+            statement = select(WikiDoc).where(or_(*conditions))
         else:
-            target_names = {name}
+            statement = select(WikiDoc).where(WikiDoc.category.contains({'name': name}))
 
-        docs = [
-            d for d in session.exec(select(WikiDoc)).all()
-            if (d.category.get('name') if isinstance(d.category, dict) else getattr(d.category, 'name', None)) in target_names
-        ]
         if limit is not None:
-            docs = docs[offset:offset + limit]
-        return docs
+            statement = statement.offset(offset).limit(limit)
+        return session.exec(statement).all()
 
 @app.put('/categories/{name}')
 async def update_category(name: str, update_data: WikiCategoryUpdate, current_user: WikiUser = Depends(get_current_user)):
