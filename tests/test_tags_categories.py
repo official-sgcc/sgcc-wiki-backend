@@ -92,6 +92,7 @@ def test_delete_unused_category_succeeds(client, admin_headers):
     client.post('/categories', json={'name': 'Orphan'}, headers=admin)
     resp = client.delete('/categories/Orphan', headers=admin)
     assert resp.status_code == 200
+    assert 'message' in resp.json()
 
 
 def test_get_documents_by_category(client, auth_headers):

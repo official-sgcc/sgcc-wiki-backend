@@ -1,4 +1,3 @@
-import importlib
 import sqlite3
 
 
@@ -74,8 +73,8 @@ def test_register_works_with_migrated_legacy_schema(tmp_path, monkeypatch):
         )
         conn.commit()
 
-    import main
-    importlib.reload(main)
+    from tests.conftest import reload_app
+    main = reload_app()
 
     from fastapi.testclient import TestClient
 
@@ -108,8 +107,9 @@ def test_password_reset_request_is_generic(client):
 
 def test_password_reset_full_flow(client):
     from sqlmodel import Session
-    from main import engine, WikiUser
-    from login_utils import create_password_reset_token
+    from core.database import engine
+    from schemas.wiki_user import WikiUser
+    from core.login_utils import create_password_reset_token
 
     client.post('/register', json={'username': 'alice123', 'password': 'Password1'})
     with Session(engine) as session:
@@ -123,8 +123,9 @@ def test_password_reset_full_flow(client):
 
 def test_password_reset_token_is_single_use(client):
     from sqlmodel import Session
-    from main import engine, WikiUser
-    from login_utils import create_password_reset_token
+    from core.database import engine
+    from schemas.wiki_user import WikiUser
+    from core.login_utils import create_password_reset_token
 
     client.post('/register', json={'username': 'alice123', 'password': 'Password1'})
     with Session(engine) as session:
@@ -175,7 +176,7 @@ def test_set_email_rejects_invalid_format(client, auth_headers):
 
 
 def test_set_email_and_verify_flow(client, auth_headers):
-    from login_utils import create_email_verification_token
+    from core.login_utils import create_email_verification_token
 
     headers, username = auth_headers('alice123')
     resp = client.put('/email', json={'email': 'alice@example.com'}, headers=headers)
@@ -200,7 +201,7 @@ def test_email_uniqueness_conflict(client, auth_headers):
 
 
 def test_verify_token_stale_after_email_change(client, auth_headers):
-    from login_utils import create_email_verification_token
+    from core.login_utils import create_email_verification_token
 
     headers, username = auth_headers('alice123')
     client.put('/email', json={'email': 'first@example.com'}, headers=headers)
@@ -211,13 +212,13 @@ def test_verify_token_stale_after_email_change(client, auth_headers):
 
 
 def test_password_reset_requires_verified_email(client, auth_headers, monkeypatch):
-    import main
-    from login_utils import create_email_verification_token
+    import routers.users
+    from core.login_utils import create_email_verification_token
 
     # send_email을 가로채 실제 발송(링크) 여부를 관찰한다. 응답은 항상 200이라
     # 발송 여부는 이 훅으로만 확인할 수 있다.
     sent = []
-    monkeypatch.setattr(main, 'send_email', lambda to, subject, body: sent.append(to))
+    monkeypatch.setattr(routers.users, 'send_email', lambda to, subject, body: sent.append(to))
 
     headers, username = auth_headers('alice123')
     client.put('/email', json={'email': 'alice@example.com'}, headers=headers)  # unverified

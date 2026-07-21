@@ -1,6 +1,20 @@
 import os
+import sys
 import tempfile
 import pytest
+
+# 엔진·설정은 임포트 시점에 만들어지므로, 캐시된 채로 두면 임시 DB가 아니라
+# 실제 wiki.db를 쓰게 된다. schemas는 지우지 않는다(테이블 재등록 에러 방지).
+APP_MODULES = ('main', 'core', 'routers')
+
+
+def reload_app():
+    """현재 환경변수로 앱 모듈 전체를 새로 임포트해 반환한다."""
+    for name in list(sys.modules):
+        if name in APP_MODULES or name.startswith(('core.', 'routers.')):
+            del sys.modules[name]
+    import main
+    return main
 
 
 @pytest.fixture
@@ -13,9 +27,7 @@ def client(monkeypatch):
     monkeypatch.setenv('ADMIN_PASSWORD', '')
     monkeypatch.setenv('JWT_SECRET_KEY', 'testsecretkey')
 
-    import importlib
-    import main
-    importlib.reload(main)
+    main = reload_app()
 
     from fastapi.testclient import TestClient
     with TestClient(main.app) as c:
@@ -39,8 +51,9 @@ def auth_headers(client):
 
 @pytest.fixture
 def admin_headers(client, monkeypatch):
-    from login_utils import hash_password
-    from main import engine, WikiUser
+    from core.login_utils import hash_password
+    from core.database import engine
+    from schemas.wiki_user import WikiUser
     from sqlmodel import Session
 
     username, password = 'rootadmin', 'Password1'
