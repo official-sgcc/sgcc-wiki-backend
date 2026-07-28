@@ -12,6 +12,37 @@ from schemas.wiki_user import WikiUser
 
 router = APIRouter()
 
+def build_category_node(cat_name, all_cats, cat_map):
+    """카테고리 이름으로 자식을 재귀 포함한 트리 노드를 만든다.
+
+    Args:
+        cat_name: 노드로 만들 카테고리 이름.
+        all_cats: 전체 카테고리 리스트(부모 매칭용).
+        cat_map: name -> WikiCategory 딕셔너리.
+
+    Returns:
+        WikiCategoryNode: children까지 채워진 노드.
+    """
+    cat = cat_map[cat_name]
+    children = [build_category_node(c.name, all_cats, cat_map) for c in all_cats if c.parent == cat_name]
+    return WikiCategoryNode(name=cat.name, parent=cat.parent, children=children)
+
+def descendant_names(cat_name, all_cats):
+    """자기 자신과 모든 하위 카테고리 이름 집합을 반환한다.
+
+    Args:
+        cat_name: 시작 카테고리 이름.
+        all_cats: 전체 카테고리 리스트(한 번 로드해서 넘길 것).
+
+    Returns:
+        set[str]: cat_name과 그 자손들의 이름.
+    """
+    names = {cat_name}
+    for cat in all_cats:
+        if cat.parent == cat_name:
+            names.update(descendant_names(cat.name, all_cats))
+    return names
+
 @router.get('/categories')
 async def get_categories():
     """전체 카테고리 목록을 조회한다. (인증 불필요)
@@ -22,14 +53,8 @@ async def get_categories():
     with Session(engine) as session:
         all_cats = session.exec(select(WikiCategory)).all()
         cat_map = {cat.name: cat for cat in all_cats}
-        
-        def build_node(cat_name: str) -> WikiCategoryNode:
-            cat = cat_map[cat_name]
-            children = [build_node(c.name) for c in all_cats if c.parent == cat_name]
-            return WikiCategoryNode(name=cat.name, parent=cat.parent, children=children)
-        
         root_cats = [cat for cat in all_cats if cat.parent is None]
-        return [build_node(cat.name) for cat in root_cats]
+        return [build_category_node(cat.name, all_cats, cat_map) for cat in root_cats]
 
 @router.post('/categories')
 async def create_category(category_in: WikiCategoryCreate, current_user: WikiUser = Depends(get_current_user)):
@@ -79,13 +104,7 @@ async def get_category(name: str):
         
         all_cats = session.exec(select(WikiCategory)).all()
         cat_map = {cat.name: cat for cat in all_cats}
-        
-        def build_node(cat_name: str) -> WikiCategoryNode:
-            cat = cat_map[cat_name]
-            children = [build_node(c.name) for c in all_cats if c.parent == cat_name]
-            return WikiCategoryNode(name=cat.name, parent=cat.parent, children=children)
-        
-        return build_node(name)
+        return build_category_node(name, all_cats, cat_map)
 
 @router.get('/categories/{name}/documents')
 async def get_documents_by_category(name: str, recursive: bool = False, limit: int | None = None, offset: int = 0):
@@ -114,13 +133,7 @@ async def get_documents_by_category(name: str, recursive: bool = False, limit: i
 
         if recursive:
             all_cats = session.exec(select(WikiCategory)).all()
-            def get_all_descendant_names(cat_name: str) -> set:
-                descendants = {cat_name}
-                for cat in all_cats:
-                    if cat.parent == cat_name:
-                        descendants.update(get_all_descendant_names(cat.name))
-                return descendants
-            target_names = get_all_descendant_names(name)
+            target_names = descendant_names(name, all_cats)
         else:
             target_names = {name}
 
@@ -214,14 +227,8 @@ async def delete_category(name: str, current_user: WikiUser = Depends(get_curren
             raise HTTPException(status_code=404, detail='Cannot find category to delete.')
 
         # Reject if any document still uses this category or its subcategories
-        def get_all_descendant_names(cat_name: str) -> set:
-            descendants = {cat_name}
-            for cat in session.exec(select(WikiCategory)).all():
-                if cat.parent == cat_name:
-                    descendants.update(get_all_descendant_names(cat.name))
-            return descendants
-        
-        all_descendants = get_all_descendant_names(name)
+        all_cats = session.exec(select(WikiCategory)).all()
+        all_descendants = descendant_names(name, all_cats)
         in_use = sum(
             1 for doc in session.exec(select(WikiDoc)).all()
             if (doc.category.get('name') if isinstance(doc.category, dict) else getattr(doc.category, 'name', None)) in all_descendants

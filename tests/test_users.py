@@ -97,6 +97,16 @@ def test_get_user_info_hides_email_to_others(client, auth_headers):
     assert 'email' in body_self
 
 
+def test_bearer_header_is_accepted(client, auth_headers):
+    # 계약: get_current_user는 'auth:'와 'Authorization: Bearer' 둘 다 받아야 한다.
+    # 나머지 테스트가 auth만 쓰므로 Bearer 경로는 여기서만 지킨다.
+    auth_h, username = auth_headers('alice123')
+    token = auth_h['auth']
+    # 'email' 필드는 self 조회에만 노출된다 → 인증이 성립해야 나온다(test_get_user_info 참고).
+    me = client.get(f'/users/{username}', headers={'Authorization': f'Bearer {token}'}).json()
+    assert 'email' in me
+
+
 def test_password_reset_request_is_generic(client):
     client.post('/register', json={'username': 'alice123', 'password': 'Password1'})
     existing = client.post('/password-reset/request', json={'username': 'alice123'})

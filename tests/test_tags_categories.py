@@ -95,6 +95,21 @@ def test_delete_unused_category_succeeds(client, admin_headers):
     assert 'message' in resp.json()
 
 
+def test_category_tree_nesting(client, auth_headers):
+    # build_category_node 재귀 검증: GET /categories(트리)와 GET /categories/{name}
+    headers, _ = auth_headers('alice123')
+    client.post('/categories', json={'name': 'Parent'}, headers=headers)
+    client.post('/categories', json={'name': 'Child', 'parent': 'Parent'}, headers=headers)
+
+    tree = client.get('/categories').json()
+    parent = next(c for c in tree if c['name'] == 'Parent')
+    assert [c['name'] for c in parent['children']] == ['Child']
+    assert 'Child' not in [c['name'] for c in tree]  # 자식은 루트로 안 뜬다
+
+    node = client.get('/categories/Parent').json()
+    assert [c['name'] for c in node['children']] == ['Child']
+
+
 def test_get_documents_by_category(client, auth_headers):
     headers, _ = auth_headers('alice123')
     client.post('/categories', json={'name': 'Parent'}, headers=headers)
