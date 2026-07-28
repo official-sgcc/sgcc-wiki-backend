@@ -10,7 +10,7 @@
 - JWT 인증, bcrypt 비밀번호 해시
 - 2단계 인증(TOTP), 이메일 등록·인증, 이메일 기반 비밀번호 재설정
 - 태그·카테고리 분류 (CRUD + 존재 검증, 카테고리 트리)
-- 문서별 권한 (`update` / `move` / `delete` / `comment`)
+- 문서별 권한 (`update` / `move` / `delete`)
 - 매일 자정 자동 DB 백업 (SQLite Backup API)
 - 인증 엔드포인트 rate limiting, 관리자 계정 자동 부트스트랩
 
@@ -138,7 +138,7 @@ pytest
 - `login_user` — 일반 가입자 기본값
 - 비로그인 — 조회만
 
-문서 수정·이동·삭제·댓글은 **문서별 권한**(`Permissions` 테이블)으로 결정됩니다. 문서 생성 시 기본값은 `update`/`comment` = 로그인 사용자 전체, `move`/`delete` = admin입니다. 단, **문서 작성자**는 자기 문서를 권한 설정과 무관하게 삭제할 수 있습니다. 태그 삭제와 카테고리 수정·삭제는 admin 전용입니다.
+문서 수정·이동·삭제는 **문서별 권한**(`Permissions` 테이블)으로 결정됩니다. 문서 생성 시 기본값은 `update` = 로그인 사용자 전체, `move`/`delete` = admin입니다. 단, **문서 작성자**는 자기 문서를 권한 설정과 무관하게 삭제할 수 있습니다. 태그 삭제와 카테고리 수정·삭제는 admin 전용입니다.
 
 ### 입력 정책
 
@@ -169,6 +169,7 @@ IP 기준이며 초과 시 `429`입니다.
 | `POST /documents` | 필요 | 문서 생성. 바디: `title`, `content`, `category`, `tags` |
 | `GET /documents/{title}` | - | 문서 단건 조회 |
 | `PUT /documents/{title}` | 문서권한 `update` | `content`/`category`/`tags` 중 보낸 필드만 수정, 새 버전 생성 |
+| `PUT /documents/{title}/move` | 문서권한 `move` | 바디: `new_title`로 새 제목으로 이동 |
 | `DELETE /documents/{title}` | 작성자 또는 문서권한 `delete` | 문서 + 버전 + 권한 레코드 삭제 |
 | `GET /documents/{title}/versions` | - | 버전 목록 |
 | `GET /documents/{title}/versions/{n}` | - | 특정 버전 |
@@ -268,6 +269,23 @@ ALTER TABLE wikiuser ADD COLUMN totp_last_step INTEGER;
 
 ```sql
 ALTER TABLE wikiuser ADD COLUMN email_verified BOOLEAN NOT NULL DEFAULT 0;
+```
+
+#### `comment` 권한 컬럼 제거
+기존 DB에 `permissions.comment` 컬럼이 남아 있으면 아래처럼 정리합니다.
+
+```sql
+ALTER TABLE permissions RENAME TO permissions_legacy;
+CREATE TABLE permissions (
+    wiki_doc_title VARCHAR NOT NULL PRIMARY KEY,
+    update JSON NOT NULL,
+    move JSON NOT NULL,
+    delete JSON NOT NULL,
+    FOREIGN KEY (wiki_doc_title) REFERENCES wikidoc(title)
+);
+INSERT INTO permissions (wiki_doc_title, update, move, delete)
+SELECT wiki_doc_title, update, move, delete FROM permissions_legacy;
+DROP TABLE permissions_legacy;
 ```
 
 #### 아주 오래된 DB의 `email` NOT NULL 제거 (이메일 선택 등록 도입 시)

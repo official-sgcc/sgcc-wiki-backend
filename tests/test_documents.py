@@ -30,6 +30,30 @@ def test_create_and_get_document(client, auth_headers):
     assert resp.json()['content'] == 'hello'
 
 
+def test_move_document_updates_title_and_versions(client, admin_headers):
+    headers, _ = admin_headers
+    client.post('/categories', json={'name': 'General'}, headers=headers)
+
+    client.post('/documents', json={
+        'title': 'Doc1',
+        'content': 'hello',
+        'category': {'name': 'General'},
+        'tags': [],
+    }, headers=headers)
+
+    resp = client.put('/documents/Doc1/move', json={'new_title': 'DocRenamed'}, headers=headers)
+    assert resp.status_code == 200
+
+    assert client.get('/documents/Doc1').status_code == 404
+
+    moved = client.get('/documents/DocRenamed')
+    assert moved.status_code == 200
+    assert moved.json()['content'] == 'hello'
+
+    versions = client.get('/documents/DocRenamed/versions').json()
+    assert len(versions) == 1
+
+
 def test_create_document_auto_creates_missing_tag(client, auth_headers):
     headers, _ = auth_headers('alice123')
     client.post('/categories', json={'name': 'General'}, headers=headers)
@@ -76,6 +100,32 @@ def test_create_document_rejects_missing_category(client, auth_headers):
         'tags': [],
     }, headers=headers)
     assert resp.status_code == 400
+
+
+def test_create_document_does_not_create_comment_permission(client, auth_headers):
+    headers, _ = auth_headers('alice123')
+    client.post('/categories', json={'name': 'General'}, headers=headers)
+
+    resp = client.post('/documents', json={
+        'title': 'DocComment',
+        'content': 'hello',
+        'category': {'name': 'General'},
+        'tags': [],
+    }, headers=headers)
+    assert resp.status_code == 200
+
+    from core.database import engine
+    from schemas.permissions import Permissions
+    from sqlmodel import Session
+
+    with Session(engine) as session:
+        permissions = session.get(Permissions, 'DocComment')
+
+    assert permissions is not None
+    assert permissions.update == ['admin', 'club_member', 'login_user']
+    assert permissions.move == ['admin']
+    assert permissions.delete == ['admin']
+    assert not hasattr(permissions, 'comment')
 
 
 def test_update_document_creates_version(client, auth_headers):

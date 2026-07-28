@@ -6,4 +6,3 @@ class Permissions(SQLModel, table=True):
     update: list[str] = Field(sa_type=JSON)
     move: list[str] = Field(sa_type=JSON)
     delete: list[str] = Field(sa_type=JSON)
-    comment: list[str] = Field(sa_type=JSON)

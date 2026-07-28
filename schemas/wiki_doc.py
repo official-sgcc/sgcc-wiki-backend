@@ -32,6 +32,9 @@ class WikiDocUpdate(BaseModel):
     category: WikiCategory | None = None
     tags: list[WikiTag] | None = None
 
+class WikiDocMove(BaseModel):
+    title: str
+
 class WikiDocVersion(SQLModel, table=True):
     wiki_doc_title: str = Field(foreign_key='wikidoc.title', primary_key=True)
     version_number: int = Field(primary_key=True)

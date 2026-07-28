@@ -116,7 +116,7 @@ select(1).select_from(tag_entries).where(func.json_extract(tag_entries.c.value, 
 ### 권한 모델
 
 - 사용자 권한: `admin` / `club_member` / `login_user` (비로그인은 `current_user=None`)
-- 문서별 권한은 `Permissions` 테이블에 action별 JSON 리스트(`update`/`move`/`delete`/`comment`). 문서 생성 시 기본값은 update·comment = 전체 로그인 등급, move·delete = admin
+- 문서별 권한은 `Permissions` 테이블에 action별 JSON 리스트(`update`/`move`/`delete`). 문서 생성 시 기본값은 update = 전체 로그인 등급, move·delete = admin.
 - `check_document_permission`은 `None`을 안전하게 거부하지만, 로그인 자체가 필수인 엔드포인트는 **`current_user is None` 체크를 직접 넣는 패턴**을 따를 것 (`POST /documents`, `POST /tags`, `POST /categories` 참고)
 - **문서 작성자**(`WikiDoc.created_by`)는 자기 문서를 권한 체크 없이 삭제 가능. 삭제에만 적용되며 update/move에는 적용하지 않는다
 - `DELETE /tags`, `PUT|DELETE /categories`는 admin 전용

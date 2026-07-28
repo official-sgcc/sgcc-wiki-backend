@@ -9,10 +9,11 @@ from core.config import logger
 from core.database import engine
 from core.deps import check_document_permission, get_current_user, validate_tags_and_category
 from schemas.permissions import Permissions
-from schemas.wiki_doc import WikiDoc, WikiDocCreate, WikiDocUpdate, WikiDocVersion
+from schemas.wiki_doc import WikiDocMove, WikiDoc, WikiDocCreate, WikiDocUpdate, WikiDocVersion
 from schemas.wiki_user import WikiUser
 
 router = APIRouter()
+
 
 @router.get('/documents')
 async def get_documents(keyword: str | None = None, limit: int | None = None, offset: int = 0):
@@ -45,7 +46,7 @@ async def create_document(doc_in: WikiDocCreate, current_user: WikiUser = Depend
 
     문서 본체와 함께 버전 1(WikiDocVersion)과 기본 문서 권한(Permissions)을 한 트랜잭션에
     생성한다. created_by에는 생성자 username이 기록되며, 이후 작성자 삭제 권한의 근거가 된다.
-    기본 권한은 update/comment=admin·club_member·login_user, move/delete=admin.
+    기본 권한은 update=admin·club_member·login_user, move/delete=admin.
 
     Args:
         doc_in: 생성할 문서(title, content, category, tags).
@@ -87,8 +88,7 @@ async def create_document(doc_in: WikiDocCreate, current_user: WikiUser = Depend
             wiki_doc_title=doc.title,
             update=['admin', 'club_member', 'login_user'],
             move=['admin'],
-            delete=['admin'],
-            comment=['admin', 'club_member', 'login_user']
+            delete=['admin']
         )
         session.add(default_permissions)
         session.commit()
@@ -185,6 +185,79 @@ async def update_document(title: str, update_data: WikiDocUpdate, current_user: 
         session.refresh(doc)
         logger.info('document updated: %s by %s (version %d)', title, current_user.username, len(doc.versions))
         return doc
+
+@router.put('/documents/{title}/move')
+async def move_document(title: str, move_data: WikiDocMove, current_user: WikiUser = Depends(get_current_user)):
+    """문서 제목을 변경한다. (문서별 `move` 권한 필요)
+
+    문서 PK가 제목이므로 이동은 실제로 제목을 새 값으로 바꾸는 rename 처리다.
+    WikiDoc.title 변경에 따라 WikiDocVersion.wiki_doc_title도 함께 갱신하고,
+    같은 새 제목의 문서가 이미 있으면 400으로 거부한다.
+
+    Args:
+        title: 현재 문서 제목.
+        move_data: 새 제목.
+        current_user: 인증 사용자(권한 검사에 사용).
+
+    Returns:
+        dict: `{'message': '...has been moved.'}`
+
+    Raises:
+        HTTPException 400: 새 제목이 비었거나, 같은 이름의 문서가 이미 있을 때.
+        HTTPException 404: 대상 문서가 없을 때.
+        HTTPException 403: 문서별 `move` 권한이 없을 때.
+    """
+    new_title = move_data.title.strip()
+    if not new_title:
+        raise HTTPException(status_code=400, detail='New title cannot be empty.')
+    if new_title == title:
+        raise HTTPException(status_code=400, detail='New title must be different from the current title.')
+
+    with Session(engine) as session:
+        if not (doc := session.get(WikiDoc, title)):
+            raise HTTPException(status_code=404, detail='Cannot find document to move')
+
+        check_document_permission(session, current_user, title, 'move')
+
+        if session.get(WikiDoc, new_title):
+            raise HTTPException(status_code=400, detail='There is already a document with the same name.')
+
+        moved_doc = WikiDoc(
+            title=new_title,
+            content=doc.content,
+            category=doc.category,
+            tags=doc.tags,
+            created_by=doc.created_by,
+            updated_at=doc.updated_at,
+        )
+        session.add(moved_doc)
+        session.flush()
+
+        for version in list(doc.versions):
+            session.add(WikiDocVersion(
+                wiki_doc=moved_doc,
+                wiki_doc_title=new_title,
+                version_number=version.version_number,
+                content=version.content,
+                category=version.category,
+                tags=version.tags,
+                updated_at=version.updated_at,
+                updated_by=version.updated_by,
+            ))
+
+        if doc.permissions is not None:
+            session.add(Permissions(
+                wiki_doc_title=new_title,
+                update=doc.permissions.update,
+                move=doc.permissions.move,
+                delete=doc.permissions.delete,
+            ))
+
+        session.delete(doc)
+        session.commit()
+        logger.info('document moved: %s -> %s by %s', title, new_title, current_user.username if current_user else 'unknown')
+        return {'message': f'The document named {title} has been moved to {new_title}.'}
+
 
 @router.delete('/documents/{title}')
 async def delete_document(title: str, current_user: WikiUser = Depends(get_current_user)):

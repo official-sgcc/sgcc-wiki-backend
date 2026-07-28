@@ -62,7 +62,7 @@ def check_document_permission(session: Session, current_user: WikiUser, title: s
         session: 활성 DB 세션.
         current_user: 현재 사용자. None(비로그인)이면 권한 등급을 None으로 취급해 거부된다.
         title: 대상 문서 제목(Permissions PK).
-        action: 검사할 동작. 'update' / 'move' / 'delete' / 'comment' 중 하나.
+        action: 검사할 동작. 'update' / 'move' / 'delete' 중 하나.
 
     Raises:
         HTTPException 403: 문서 권한 설정이 없거나, 허용 목록이 비었거나,
