@@ -95,6 +95,13 @@ def test_delete_unused_category_succeeds(client, admin_headers):
     assert 'message' in resp.json()
 
 
+def test_create_category_rejects_missing_parent(client, auth_headers):
+    # 유령 부모 → 트리 누락/순환(무한 재귀) 방지: 없는 부모 지정 시 400.
+    headers, _ = auth_headers('alice123')
+    resp = client.post('/categories', json={'name': 'Child', 'parent': 'ghost'}, headers=headers)
+    assert resp.status_code == 400
+
+
 def test_category_tree_nesting(client, auth_headers):
     # build_category_node 재귀 검증: GET /categories(트리)와 GET /categories/{name}
     headers, _ = auth_headers('alice123')

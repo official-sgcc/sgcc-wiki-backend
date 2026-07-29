@@ -128,6 +128,31 @@ def test_create_document_does_not_create_comment_permission(client, auth_headers
     assert not hasattr(permissions, 'comment')
 
 
+def test_update_document_category_move_requires_admin(client, auth_headers, admin_headers):
+    # 카테고리 변경(이동)은 move 권한(기본 admin) 필요. 일반 사용자는 403, admin은 성공.
+    headers, _ = auth_headers('alice123')
+    _prep_tag_and_category(client, headers)
+    client.post('/categories', json={'name': 'Other'}, headers=headers)
+    client.post('/documents', json={
+        'title': 'Doc1',
+        'content': 'v1',
+        'category': {'name': 'General'},
+        'tags': [],
+    }, headers=headers)
+
+    # 같은 카테고리 재지정은 이동이 아니므로 update 권한만으로 통과
+    same = client.put('/documents/Doc1', json={'category': {'name': 'General'}}, headers=headers)
+    assert same.status_code == 200
+
+    # 다른 카테고리로 변경은 move 권한 필요 → 일반 사용자 403
+    resp = client.put('/documents/Doc1', json={'category': {'name': 'Other'}}, headers=headers)
+    assert resp.status_code == 403
+
+    admin, _ = admin_headers
+    resp = client.put('/documents/Doc1', json={'category': {'name': 'Other'}}, headers=admin)
+    assert resp.status_code == 200
+
+
 def test_update_document_creates_version(client, auth_headers):
     headers, _ = auth_headers('alice123')
     _prep_tag_and_category(client, headers)

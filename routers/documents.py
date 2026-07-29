@@ -135,7 +135,7 @@ async def update_document(title: str, update_data: WikiDocUpdate, current_user: 
 
     Raises:
         HTTPException 404: 대상 문서가 없을 때.
-        HTTPException 403: 문서별 `update` 권한이 없을 때.
+        HTTPException 403: 문서별 `update` 권한이 없거나, 카테고리를 바꾸는데 `move` 권한이 없을 때.
         HTTPException 400: 참조 태그·카테고리가 없을 때.
         HTTPException 409: 동시 수정 충돌로 3회 재시도 후에도 저장 실패.
     """
@@ -144,6 +144,14 @@ async def update_document(title: str, update_data: WikiDocUpdate, current_user: 
             raise HTTPException(status_code=404, detail='Cannot find document to update')
 
         check_document_permission(session, current_user, title, 'update')
+
+        # 카테고리를 실제로 바꾸는 것은 이동이므로 admin 기본인 'move' 권한을 요구한다.
+        # 같은 카테고리 재지정은 이동이 아니라 그냥 통과시킨다.
+        if update_data.category is not None:
+            new_name = update_data.category.name if hasattr(update_data.category, 'name') else update_data.category.get('name')
+            old_name = doc.category.get('name') if isinstance(doc.category, dict) else getattr(doc.category, 'name', None)
+            if new_name != old_name:
+                check_document_permission(session, current_user, title, 'move')
 
         validate_tags_and_category(session, update_data.tags, update_data.category, current_user=current_user, create_missing_tags=True)
 
