@@ -23,6 +23,9 @@ class TotpLogin(BaseModel):
 class EmailUpdate(BaseModel):
     email: str
 
+class BioUpdate(BaseModel):
+    bio: str
+
 class EmailVerify(BaseModel):
     token: str
 
