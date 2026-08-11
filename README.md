@@ -167,6 +167,7 @@ IP 기준이며 초과 시 `429`입니다.
 |---|---|---|
 | `GET /documents` | - | 문서 목록. `keyword`가 있으면 제목·본문 부분 일치로 필터 |
 | `POST /documents` | 필요 | 문서 생성. 바디: `title`, `content`, `category`, `tags` |
+| `GET /documents/count` | - | 총 문서 수 |
 | `GET /documents/{title}` | - | 문서 단건 조회 |
 | `PUT /documents/{title}` | 문서권한 `update` | `content`/`category`/`tags` 중 보낸 필드만 수정, 새 버전 생성 |
 | `PUT /documents/{title}/move` | 문서권한 `move` | 바디: `new_title`로 새 제목으로 이동 |
@@ -188,6 +189,7 @@ IP 기준이며 초과 시 `429`입니다.
 | `POST /login` | - | `{token}` 또는 `{mfa_required, mfa_token}` |
 | `POST /login/2fa` | - | 바디: `mfa_token`, `code` → `{token}` |
 | `GET /users/{username}` | 선택 | 프로필 + `edit_versions`(작성한 문서 버전, 최신순). `password`/`totp_secret`은 항상 제외, `email`은 본인 조회에만 포함 |
+| `PUT /users/{username}/bio` | 필요 | 소개문 수정. 바디: `bio` |
 | `POST /2fa/setup` | 필요 | `{secret, otpauth_uri}` |
 | `POST /2fa/enable` | 필요 | 바디: `code` |
 | `POST /2fa/disable` | 필요 | 바디: `code` |
