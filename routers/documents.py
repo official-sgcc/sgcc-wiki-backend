@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from diff_match_patch import diff_match_patch
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func
 from sqlmodel import Session, select
 from core.config import logger
 from core.database import engine
@@ -39,6 +40,37 @@ async def get_documents(keyword: str | None = None, limit: int | None = None, of
         if limit is not None:
             statement = statement.offset(offset).limit(limit)
         return session.exec(statement).all()
+
+
+@router.get('/documents/count')
+async def get_documents_count(category: str | None = None, tag: str | None = None):
+    """총 문서 개수를 반환한다. (인증 불필요)
+
+    Args:
+        category: 특정 카테고리명으로 필터링하여 개수 반환.
+        tag: 특정 태그명으로 필터링하여 개수 반환.
+
+    Returns:
+        dict: {'count': <int>} 총 문서 개수
+    """
+    with Session(engine) as session:
+        if category is not None or tag is not None:
+            statement = select(WikiDoc)
+            if category is not None:
+                statement = statement.where(func.json_extract(WikiDoc.category, '$.name') == category)
+            if tag is not None:
+                statement = statement.where(WikiDoc.tags.contains(f'"{tag}"'))
+            docs = session.exec(statement).all()
+            if tag is not None:
+                docs = [
+                    d for d in docs
+                    if any((t.get('name') if isinstance(t, dict) else getattr(t, 'name', None)) == tag for t in (d.tags or []))
+                ]
+            return {'count': len(docs)}
+
+        statement = select(func.count(WikiDoc.title))
+        total = session.exec(statement).one()
+        return {'count': int(total)}
 
 @router.post('/documents')
 async def create_document(doc_in: WikiDocCreate, current_user: WikiUser = Depends(get_current_user)):
