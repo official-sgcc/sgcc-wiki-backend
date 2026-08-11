@@ -64,6 +64,8 @@ async def create_document(doc_in: WikiDocCreate, current_user: WikiUser = Depend
     with Session(engine) as session:
         if session.get(WikiDoc, doc_in.title):
             raise HTTPException(status_code=400, detail='There is already a document with the same name.')
+        if not doc_in.title:
+            raise HTTPException(status_code=400, detail='Document title cannot be empty.')
 
         validate_tags_and_category(session, doc_in.tags, doc_in.category, current_user=current_user, create_missing_tags=True)
 
