@@ -18,35 +18,78 @@ from core.login_utils import (
 from core.maintenance import send_email, send_email_verification
 from schemas.wiki_doc import WikiDocVersion
 from schemas.wiki_user import (
-    WikiUser, UserIdAndPassword,
+    WikiUser, UserRegisterForm, RegisterEmailRequest, UserIdAndPassword,
     PasswordResetRequest, PasswordResetConfirm, TotpCode, TotpLogin,
     EmailUpdate, BioUpdate, EmailVerify,
 )
 
 router = APIRouter()
 
+@router.post('/register/verify-email')
+@limiter.limit('3/minute')
+async def request_register_email_verification(request: Request, body: RegisterEmailRequest):
+    """최종 회원가입 전에 이메일 인증 메일을 발송한다. (rate limit: IP당 분당 3회)
+
+    계정 생성 전에 인증 링크를 보내기만 하고, 실제 사용자 계정은 아직 만들지 않는다.
+    이 엔드포인트로 인증 메일을 먼저 보낸 뒤, 링크를 통해 발급된 토큰을
+    최종 가입 API에 전달한다.
+
+    Args:
+        request: slowapi rate limiter가 요구하는 요청 객체(직접 사용하지 않음).
+        user_info: 이메일 정보(username, email).
+
+    Returns:
+        dict: `{'message': 'A verification link has been sent to your email address.'}`
+
+    Raises:
+        HTTPException 400: 중복 아이디.
+        HTTPException 409: 이미 사용중인 이메일.
+        HTTPException 429: 분당 요청 한도 초과(rate limit).
+    """
+    validate_username(body.username)
+    validate_email(body.email)
+
+    with Session(engine) as session:
+        if session.get(WikiUser, body.username):
+            raise HTTPException(status_code=400, detail='Username already exists.')
+        if session.exec(select(WikiUser).where(WikiUser.email == body.email)).first():
+            raise HTTPException(status_code=409, detail='Email already in use.')
+
+    send_email_verification(body.username, body.email)
+    logger.info('signup verification email sent: %s', body.email)
+    return {'message': 'A verification link has been sent to your email address.'}
+
 @router.post('/register')
 @limiter.limit('3/minute')
-async def register_user(request: Request, user_info: UserIdAndPassword):
-    """새 사용자를 등록한다. (rate limit: IP당 분당 3회)
+async def register_user(request: Request, user_info: UserRegisterForm):
+    """이메일 인증을 완료한 뒤 최종 회원가입을 생성한다. (rate limit: IP당 분당 3회)
 
+    프런트는 `/register/verify-email`로 인증 메일을 먼저 보내고, 링크에 포함된
+    verification_token을 최종 가입 단계에서 함께 제출한다. 
     username(3~32자, [a-zA-Z0-9_-])과 password(8자 이상, 영문+숫자 포함) 정책을
     검증한 뒤, 중복 아이디와 예약어(RESERVED_USERNAMES)를 거부한다. 신규 계정 권한은
     'login_user'이며 비밀번호는 bcrypt로 해시해 저장한다.
 
     Args:
         request: slowapi rate limiter가 요구하는 요청 객체(직접 사용하지 않음).
-        user_info: 가입 정보(username, password).
+        user_info: 가입 정보(username, password, email).
 
     Returns:
         dict: `{'message': 'User ... has been registered successfully.'}`
 
     Raises:
-        HTTPException 400: username/password 정책 위반, 중복 아이디, 또는 예약어일 때.
+        HTTPException 400: username/password 정책 위반, 중복 아이디, 또는 예약어일 때. 유효하지 않은 토큰일 때.
         HTTPException 429: 분당 요청 한도 초과(rate limit).
     """
     validate_username(user_info.username)
     validate_password(user_info.password)
+    validate_email(user_info.email)
+    if not user_info.verification_token:
+        raise HTTPException(status_code=400, detail='Verification token is required to complete registration.')
+
+    username, email = verify_email_verification_token(user_info.verification_token)
+    if username != user_info.username or email != user_info.email:
+        raise HTTPException(status_code=400, detail='Verification token does not match the submitted registration data.')
 
     with Session(engine) as session:
         if session.get(WikiUser, user_info.username):
@@ -58,11 +101,26 @@ async def register_user(request: Request, user_info: UserIdAndPassword):
                 detail='This username is reserved and cannot be used.',
             )
 
-        user = WikiUser(username=user_info.username, password=hash_password(user_info.password), permission='login_user', bio='', email=None)
+        if session.exec(select(WikiUser).where(WikiUser.email == user_info.email)).first():
+            raise HTTPException(status_code=409, detail='Email already in use.')
 
-        session.add(user)
-        session.commit()
-        session.refresh(user)
+        user = WikiUser(
+            username=user_info.username,
+            password=hash_password(user_info.password),
+            permission='login_user',
+            bio='',
+            email=user_info.email,
+            email_verified=True,
+        )
+
+        try:
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+        except IntegrityError:
+            session.rollback()
+            raise HTTPException(status_code=409, detail='Email already in use.')
+
         logger.info('user registered: %s', user_info.username)
         return {'message': f'User {user_info.username} has been registered successfully.'}
 

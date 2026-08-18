@@ -41,8 +41,10 @@ def client(monkeypatch):
 
 @pytest.fixture
 def auth_headers(client):
-    def _create(username='alice123', password='Password1'):
-        client.post('/register', json={'username': username, 'password': password})
+    def _create(username='alice123', password='Password1', email='alice@example.com'):
+        client.post('/register/verify-email', json={'username': username, 'email': email})
+        token = __import__('core.login_utils', fromlist=['create_email_verification_token']).create_email_verification_token(username, email)
+        client.post('/register', json={'username': username, 'password': password, 'email': email, 'verification_token': token})
         resp = client.post('/login', json={'username': username, 'password': password})
         token = resp.json()['token']
         return {'auth': token}, username

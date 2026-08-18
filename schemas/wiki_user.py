@@ -2,6 +2,16 @@ from sqlmodel import Relationship, SQLModel, Field
 from pydantic import BaseModel
 from .permissions import Permissions
 
+class UserRegisterForm(BaseModel):
+    username: str
+    password: str
+    email: str
+    verification_token: str | None = None
+
+class RegisterEmailRequest(BaseModel):
+    username: str
+    email: str
+
 class UserIdAndPassword(BaseModel):
     username: str
     password: str
