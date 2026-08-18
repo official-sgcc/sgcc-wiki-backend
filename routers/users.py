@@ -87,8 +87,9 @@ async def register_verify_status(body: RegisterEmailRequest):
 async def register_user(request: Request, user_info: UserRegisterForm):
     """이메일 인증을 완료한 뒤 최종 회원가입을 생성한다. (rate limit: IP당 분당 3회)
 
-    프런트는 `/register/verify-email`로 인증 메일을 먼저 보내고, 링크에 포함된
-    verification_token을 최종 가입 단계에서 함께 제출한다. 
+    프런트는 `/register/verify-email`로 인증 메일을 먼저 보내고, 토큰을 가지고 있다면
+    verification_token을 최종 가입 단계에서 함께 제출한다. 토큰이 없다면 링크에서
+    EmailVerification으로 인증 사실을 저장하고 이를 검증한다.
     username(3~32자, [a-zA-Z0-9_-])과 password(8자 이상, 영문+숫자 포함) 정책을
     검증한 뒤, 중복 아이디와 예약어(RESERVED_USERNAMES)를 거부한다. 신규 계정 권한은
     'login_user'이며 비밀번호는 bcrypt로 해시해 저장한다.
