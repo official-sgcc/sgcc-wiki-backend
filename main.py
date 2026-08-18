@@ -12,7 +12,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from core.config import FRONTEND_URL, limiter
 from core.maintenance import backup_database, bootstrap_admin
-from routers import categories, documents, tags, users
+from routers import categories, documents, health, tags, users
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -53,3 +53,4 @@ app.include_router(documents.router)
 app.include_router(users.router)
 app.include_router(tags.router)
 app.include_router(categories.router)
+app.include_router(health.router)

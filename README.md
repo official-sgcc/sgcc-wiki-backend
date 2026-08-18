@@ -13,6 +13,7 @@
 - 문서별 권한 (`update` / `move` / `delete`)
 - 매일 자정 자동 DB 백업 (SQLite Backup API)
 - 인증 엔드포인트 rate limiting, 관리자 계정 자동 부트스트랩
+- DB 커넥션까지 확인하는 헬스체크 (`GET /healthz`)
 
 ## 기술 스택
 
@@ -33,7 +34,8 @@ sgcc-wiki-backend/
 │   ├── documents.py        # 문서 CRUD, 버전·diff, 검색
 │   ├── users.py            # 가입·로그인, 2FA, 이메일, 비밀번호 재설정
 │   ├── tags.py             # 태그
-│   └── categories.py       # 카테고리
+│   ├── categories.py       # 카테고리
+│   └── health.py           # 헬스체크
 ├── schemas/
 │   ├── wiki_doc.py         # WikiDoc, WikiDocVersion
 │   ├── wiki_user.py        # WikiUser + 요청 바디 모델
@@ -43,7 +45,7 @@ sgcc-wiki-backend/
 ├── tests/                  # pytest (conftest.py가 임시 DB로 격리)
 ├── db_backups/             # 자동 백업 (gitignore)
 ├── logs/                   # app.log + 회전 백업 (gitignore)
-├── wiki.db                 # SQLite 데이터베이스
+├── wiki.db                 # SQLite 데이터베이스 (gitignore, 없으면 서버 시작 시 자동 생성)
 └── .env                    # 환경변수 (gitignore)
 ```
 
@@ -269,6 +271,14 @@ IP 기준이며 초과 시 `429`입니다.
 | `GET /categories/{name}/documents` | - | 카테고리에 속한 **문서** 목록. `recursive=true`면 하위 카테고리 문서까지 포함 |
 | `PUT /categories/{name}` | admin | 바디: `parent`. 자기 하위 노드를 부모로 지정하는 순환 참조는 거부 |
 | `DELETE /categories/{name}` | admin | 하위 카테고리까지 삭제. 문서가 사용 중이면 409 |
+
+### 헬스체크
+
+| 엔드포인트 | 인증 | 설명 |
+|---|---|---|
+| `GET /healthz` | - | 서비스 상태 확인. DB 커넥션까지 검사해 정상이면 `{"status": "ok"}`, DB 접근 실패 시 503 |
+
+기능(로그인 등)이 정상인지는 검사하지 않습니다. `/login`은 분당 5회 제한이고 실패해도 bcrypt를 돌리므로, 프로브가 rate limit을 소진해 멀쩡한 노드를 장애로 오판하게 만듭니다. 기능 검증은 배포 전 `pytest`, 운영 중에는 실제 요청의 5xx 에러율 알람으로 합니다.
 
 ## 운영 노트
 
