@@ -69,14 +69,18 @@ async def create_category(category_in: WikiCategoryCreate, current_user: WikiUse
 
     Raises:
         HTTPException 401: 비로그인 상태.
-        HTTPException 400: 같은 이름의 카테고리가 이미 있을 때.
+        HTTPException 400: 같은 이름의 카테고리가 이미 있거나, 지정한 부모가 없을 때.
     """
     if current_user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Login required to create a category.')
     with Session(engine) as session:
         if session.get(WikiCategory, category_in.name):
             raise HTTPException(status_code=400, detail='Category name already exists.')
-        
+        # 부모 미검증 시 유령 부모(트리에서 문서 누락)·순환(A↔B, build_category_node 무한 재귀→500)이 생긴다.
+        # 새 카테고리는 아직 아무도 안 가리키므로 부모 존재만 확인하면 순환은 원천 차단된다.
+        if category_in.parent is not None and not session.get(WikiCategory, category_in.parent):
+            raise HTTPException(status_code=400, detail=f'Parent category \'{category_in.parent}\' does not exist.')
+
         category = WikiCategory(**category_in.model_dump())
         session.add(category)
         session.commit()
