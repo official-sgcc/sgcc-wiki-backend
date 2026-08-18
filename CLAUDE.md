@@ -10,18 +10,6 @@ FastAPI + SQLModel + SQLite로 만든 소규모 위키 백엔드(`sgcc-wiki-back
 
 **루트에 두는 파이썬 파일은 `main.py` 하나뿐이다.** 나머지는 전부 패키지 안에 넣는다.
 
-```
-main.py              앱 조립 — 미들웨어, lifespan, include_router만. 여기에 엔드포인트를 두지 말 것
-core/
-  config.py          load_dotenv, 로깅, 환경변수 상수, limiter
-  database.py        engine + create_all (모델 임포트로 metadata 등록)
-  deps.py            get_current_user, check_document_permission, validate_tags_and_category
-  login_utils.py     비밀번호 해시, JWT/TOTP 토큰, 입력 검증
-  maintenance.py     send_email, backup_database, bootstrap_admin
-routers/             도메인별 엔드포인트: documents(+검색·버전·diff) / users(+2FA·이메일·재설정) / tags / categories
-schemas/             SQLModel 테이블 + 요청 바디 모델
-```
-
 의존 방향은 `main → routers → core.deps/core.maintenance → core.database → core.config` 한 방향이다. 역방향 임포트(순환)를 만들지 말 것. 임포트는 상대(`from .config import`)가 아니라 **절대 경로**(`from core.config import`)로 쓴다. 새 엔드포인트는 해당 도메인 라우터에 추가하고, 도메인이 늘면 `routers/`에 파일을 하나 더 만들어 `main.py`에서 `include_router`한다.
 
 ## 코드 스타일
@@ -41,11 +29,8 @@ schemas/             SQLModel 테이블 + 요청 바디 모델
 ## 명령어
 
 ```bash
-# 의존성 설치 (런타임)
-pip install fastapi sqlmodel bcrypt pyjwt python-dotenv uvicorn apscheduler diff_match_patch slowapi pyotp
-
-# 의존성 설치 (테스트)
-pip install pytest httpx
+# 의존성 설치 (런타임 + 테스트)
+pip install -r requirements.txt
 
 # 개발 서버 실행 (자동 리로드)
 uvicorn main:app --reload
