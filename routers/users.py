@@ -20,7 +20,7 @@ from schemas.wiki_doc import WikiDocVersion
 from schemas.wiki_user import (
     WikiUser, UserIdAndPassword,
     PasswordResetRequest, PasswordResetConfirm, TotpCode, TotpLogin,
-    EmailUpdate, EmailVerify,
+    EmailUpdate, BioUpdate, EmailVerify,
 )
 
 router = APIRouter()
@@ -100,6 +100,39 @@ async def get_user_info(username: str, current_user: WikiUser = Depends(get_curr
             user_data = user.model_dump(exclude={'password', 'totp_secret'})
         user_data['edit_versions'] = edit_versions
         return user_data
+
+@router.put('/users/{username}/bio')
+async def update_user_bio(username: str, body: BioUpdate, current_user: WikiUser = Depends(get_current_user)):
+    """본인 계정의 소개 문구를 수정한다. (로그인 필요)
+
+    Args:
+        username: 수정 대상 사용자명. 본인만 수정할 수 있다.
+        body: `{bio}`.
+        current_user: 인증 사용자.
+
+    Returns:
+        dict: `{'bio': '<저장된 소개>'}`.
+
+    Raises:
+        HTTPException 401: 비로그인 상태.
+        HTTPException 403: 다른 사용자의 bio를 수정하려 할 때.
+    """
+    if current_user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Login required.')
+    if current_user.username != username:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='You can only update your own bio.')
+
+    with Session(engine) as session:
+        user = session.get(WikiUser, username)
+        if not user:
+            raise HTTPException(status_code=404, detail='Cannot find user with the corresponding username.')
+
+        user.bio = body.bio
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        logger.info('user bio updated: %s', username)
+        return {'bio': user.bio}
 
 @router.post('/login')
 @limiter.limit('5/minute')

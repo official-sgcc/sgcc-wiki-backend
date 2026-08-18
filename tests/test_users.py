@@ -97,6 +97,20 @@ def test_get_user_info_hides_email_to_others(client, auth_headers):
     assert 'email' in body_self
 
 
+def test_update_bio_for_self_and_read_it(client, auth_headers):
+    headers, username = auth_headers('alice123')
+
+    resp = client.put(f'/users/{username}/bio', json={'bio': 'Hello world'}, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()['bio'] == 'Hello world'
+
+    me = client.get(f'/users/{username}', headers=headers).json()
+    assert me['bio'] == 'Hello world'
+
+    public = client.get(f'/users/{username}').json()
+    assert public['bio'] == 'Hello world'
+
+
 def test_bearer_header_is_accepted(client, auth_headers):
     # 계약: get_current_user는 'auth:'와 'Authorization: Bearer' 둘 다 받아야 한다.
     # 나머지 테스트가 auth만 쓰므로 Bearer 경로는 여기서만 지킨다.
