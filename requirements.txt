@@ -1,0 +1,14 @@
+fastapi
+sqlmodel
+bcrypt
+pyjwt
+python-dotenv
+uvicorn[standard]
+apscheduler
+diff-match-patch
+slowapi
+pyotp
+
+# Optional / testing
+pytest
+httpx

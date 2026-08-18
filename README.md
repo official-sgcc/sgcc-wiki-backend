@@ -69,6 +69,57 @@ pip install pytest httpx
 pytest
 ```
 
+## Docker
+
+이 프로젝트는 루트의 `Dockerfile`로 컨테이너 이미지를 빌드할 수 있습니다. 기본 베이스 이미지는 `python:3.11-slim`이며, 의존성 설치 후 `uvicorn main:app --host 0.0.0.0 --port 8000`을 실행합니다.
+
+### 이미지 빌드
+
+```bash
+docker build -t sgcc-wiki-backend .
+```
+
+### 컨테이너 실행
+
+프로젝트 루트에 `.env`를 두고 필수 환경변수인 `JWT_SECRET_KEY`를 포함한 뒤 실행합니다.
+
+```bash
+docker run --rm -it \
+  --name sgcc-wiki-backend \
+  --env-file .env \
+  -p 8000:8000 \
+  sgcc-wiki-backend
+```
+
+- 서버 주소: http://localhost:8000
+- Swagger UI: http://localhost:8000/docs
+
+### Dockerfile 동작 요약
+
+- Python 3.11 slim 이미지 사용
+- `requirements.txt`를 설치해 런타임 의존성 구성
+- 소스코드를 `/app`에 복사
+- 컨테이너 내부에서 `uvicorn`으로 FastAPI 앱 실행
+- 기본 포트는 `8000`이며, 현재 `CMD`는 포트를 하드코딩하고 있어 컨테이너 실행 시 `-p 8000:8000` 조합이 가장 안전합니다
+
+> 현재 Dockerfile은 `ARG PORT`를 선언하지만 실제 실행 명령은 `--port 8000`으로 고정되어 있으므로, 포트 변경이 필요하면 Dockerfile의 `CMD`도 함께 맞춰야 합니다.
+
+### 운영 시 주의사항
+
+- `.env`는 호스트에 두고 `--env-file .env`로 주입해야 합니다
+- `FRONTEND_URL`, `JWT_SECRET_KEY`, SMTP 관련 값이 없으면 API 동작이 제한될 수 있습니다
+- `wiki.db`와 `logs/`, `db_backups/`는 컨테이너 내부 경로와 호스트 경로를 연결해 관리하는 것이 안전합니다
+
+```bash
+docker run --rm -it \
+  --env-file .env \
+  -p 8000:8000 \
+  -v "${PWD}/wiki.db:/app/wiki.db" \
+  -v "${PWD}/logs:/app/logs" \
+  -v "${PWD}/db_backups:/app/db_backups" \
+  sgcc-wiki-backend
+```
+
 ## 환경변수
 
 | 이름 | 기본값 | 설명 |
