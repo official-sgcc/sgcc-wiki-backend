@@ -41,7 +41,11 @@ def client(monkeypatch):
 
 @pytest.fixture
 def auth_headers(client):
-    def _create(username='alice123', password='Password1', email='alice@example.com'):
+    def _create(username='alice123', password='Password1', email: str | None = None):
+        # Default email is derived from username to avoid collisions when the
+        # helper is called multiple times within the same test.
+        if email is None:
+            email = f'{username}@example.com'
         client.post('/register/verify-email', json={'username': username, 'email': email})
         token = __import__('core.login_utils', fromlist=['create_email_verification_token']).create_email_verification_token(username, email)
         client.post('/register', json={'username': username, 'password': password, 'email': email, 'verification_token': token})

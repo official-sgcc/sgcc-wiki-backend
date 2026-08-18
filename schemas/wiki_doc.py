@@ -33,7 +33,9 @@ class WikiDocUpdate(BaseModel):
     tags: list[WikiTag] | None = None
 
 class WikiDocMove(BaseModel):
-    title: str
+    # Tests and frontend send {"new_title": "..."}; accept that key as the
+    # aliased field name and expose it as `title` in code.
+    title: str = Field(alias='new_title')
 
 class WikiDocVersion(SQLModel, table=True):
     wiki_doc_title: str = Field(foreign_key='wikidoc.title', primary_key=True)

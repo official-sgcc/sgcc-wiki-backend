@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 from core.config import FRONTEND_URL, RESERVED_USERNAMES, limiter, logger
 from core.database import engine
+from datetime import datetime
 from core.deps import get_current_user
 from core.login_utils import (
     hash_password, verify_password, create_jwt_token,
@@ -22,6 +23,7 @@ from schemas.wiki_user import (
     PasswordResetRequest, PasswordResetConfirm, TotpCode, TotpLogin,
     EmailUpdate, BioUpdate, EmailVerify,
 )
+from schemas.wiki_user import EmailVerification
 
 router = APIRouter()
 
@@ -59,6 +61,27 @@ async def request_register_email_verification(request: Request, body: RegisterEm
     logger.info('signup verification email sent: %s', body.email)
     return {'message': 'A verification link has been sent to your email address.'}
 
+@router.post('/register/verify-status')
+async def register_verify_status(body: RegisterEmailRequest):
+    """프론트에서 회원가입 중 입력한 이메일이 이미 인증되었는지 체크한다.
+
+    body: `{username, email}`
+    
+    Returns: `{'verified': True|False}`
+    """
+    with Session(engine) as session:
+        ev = session.exec(
+            select(EmailVerification)
+            .where(
+                EmailVerification.username == body.username,
+                EmailVerification.email == body.email,
+                EmailVerification.verified == True,
+            )
+        ).first()
+        if ev and not (ev.expires_at and ev.expires_at < datetime.utcnow()):
+            return {'verified': True}
+        return {'verified': False}
+
 @router.post('/register')
 @limiter.limit('3/minute')
 async def register_user(request: Request, user_info: UserRegisterForm):
@@ -78,18 +101,29 @@ async def register_user(request: Request, user_info: UserRegisterForm):
         dict: `{'message': 'User ... has been registered successfully.'}`
 
     Raises:
-        HTTPException 400: username/password 정책 위반, 중복 아이디, 또는 예약어일 때. 유효하지 않은 토큰일 때.
+        HTTPException 400: username/password 정책 위반, 중복 아이디, 또는 예약어일 때. 유효하지 않은 토큰이거나 인증 정보를 확인할 수 없음.
         HTTPException 429: 분당 요청 한도 초과(rate limit).
     """
     validate_username(user_info.username)
     validate_password(user_info.password)
     validate_email(user_info.email)
-    if not user_info.verification_token:
-        raise HTTPException(status_code=400, detail='Verification token is required to complete registration.')
 
-    username, email = verify_email_verification_token(user_info.verification_token)
-    if username != user_info.username or email != user_info.email:
-        raise HTTPException(status_code=400, detail='Verification token does not match the submitted registration data.')
+    if user_info.verification_token:
+        username, email = verify_email_verification_token(user_info.verification_token)
+        if username != user_info.username or email != user_info.email:
+            raise HTTPException(status_code=400, detail='Verification token does not match the submitted registration data.')
+    else:
+        with Session(engine) as session:
+            ev = session.exec(
+                select(EmailVerification)
+                .where(
+                    EmailVerification.username == user_info.username,
+                    EmailVerification.email == user_info.email,
+                    EmailVerification.verified == True,
+                )
+            ).first()
+            if not ev or (ev.expires_at and ev.expires_at < datetime.utcnow()):
+                raise HTTPException(status_code=400, detail='Email not verified yet. Please verify your email via the link sent.')
 
     with Session(engine) as session:
         if session.get(WikiUser, user_info.username):
@@ -440,7 +474,7 @@ async def disable_2fa(body: TotpCode, current_user: WikiUser = Depends(get_curre
 
 @router.put('/email')
 async def set_email(body: EmailUpdate, current_user: WikiUser = Depends(get_current_user)):
-    """본인 계정에 이메일을 등록하거나 변경한다. (로그인 필요)
+    """본인 계정의 이메일을 변경한다. (로그인 필요)
 
     새 이메일은 항상 미인증 상태(email_verified=False)로 저장되고, 곧바로 인증 링크를
     발송한다. 이메일은 계정 간 유일해야 한다.
@@ -530,14 +564,20 @@ async def verify_email(request: Request, body: EmailVerify):
     """
     username, email = verify_email_verification_token(body.token)
     with Session(engine) as session:
-        user = session.get(WikiUser, username)
-        if not user or user.email != email:
+        ev = session.exec(select(EmailVerification).where(EmailVerification.token == body.token)).first()
+        if not ev or (ev.expires_at and ev.expires_at < datetime.utcnow()):
             raise HTTPException(status_code=400, detail='Invalid or expired verification token.')
-        if user.email_verified:
+        if ev.verified:
             return {'message': 'Email is already verified.'}
 
-        user.email_verified = True
-        session.add(user)
+        ev.verified = True
+        session.add(ev)
+
+        user = session.get(WikiUser, username)
+        if user and user.email == email and not user.email_verified:
+            user.email_verified = True
+            session.add(user)
+
         session.commit()
-        logger.info('email verified: %s', user.username)
+        logger.info('email verified (token): %s', username)
         return {'message': 'Email has been verified.'}

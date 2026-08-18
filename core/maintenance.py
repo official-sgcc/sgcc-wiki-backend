@@ -3,7 +3,7 @@
 import os
 import smtplib
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.message import EmailMessage
 from sqlmodel import Session
 from core.config import (
@@ -12,7 +12,7 @@ from core.config import (
 )
 from core.database import engine
 from core.login_utils import create_email_verification_token, hash_password
-from schemas.wiki_user import WikiUser
+from schemas.wiki_user import WikiUser, EmailVerification
 
 def send_email(to: str, subject: str, body: str):
     """이메일을 발송한다. SMTP가 설정돼 있으면 실제 전송, 아니면 로그로 대체한다.
@@ -40,6 +40,19 @@ def send_email(to: str, subject: str, body: str):
 def send_email_verification(username: str, email: str):
     """해당 이메일로 인증 링크를 발송한다."""
     token = create_email_verification_token(username, email)
+    expires = datetime.utcnow() + timedelta(hours=24)
+    ev = EmailVerification(
+        username=username,
+        email=email,
+        token=token,
+        verified=False,
+        created_at=datetime.utcnow(),
+        expires_at=expires,
+    )
+    with Session(engine) as session:
+        session.add(ev)
+        session.commit()
+
     verify_link = f'{FRONTEND_URL}/verify-email?token={token}'
     send_email(
         email,

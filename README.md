@@ -165,7 +165,10 @@ docker run --rm -it \
 
 ### 이메일 등록·인증
 
-회원가입은 아이디/비밀번호만 받고, 이메일은 로그인 후 등록합니다.
+회원가입 시 이메일을 인증해야 합니다.
+
+- `POST /register/verify-email` — 회원가입 이메일 인증 발송.
+- `POST /register/verify-status` — 이메일 인증 여부 확인. EmailVerification으로 저장하여 다른 기기에서 인증해도 확인할 수 있음.
 
 1. `PUT /email` — 이메일 등록/변경. 저장 시 항상 **미인증** 상태가 되고 인증 링크가 발송됨. 계정 간 유일(중복 409)
 2. 메일 링크 → `POST /email/verify`
