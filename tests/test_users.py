@@ -1,9 +1,47 @@
 import sqlite3
 
 
-def test_register_and_login(client):
-    resp = client.post('/register', json={'username': 'alice123', 'password': 'Password1'})
+def test_register_sends_verification_email_before_account_creation(client, monkeypatch):
+    import routers.users
+
+    sent = []
+    monkeypatch.setattr(routers.users, 'send_email_verification', lambda username, email: sent.append(email))
+
+    resp = client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice@example.com'})
     assert resp.status_code == 200
+    assert sent == ['alice@example.com']
+
+    from sqlmodel import Session
+    from core.database import engine
+    from schemas.wiki_user import WikiUser
+    with Session(engine) as session:
+        user = session.get(WikiUser, 'alice123')
+        assert user is None
+
+    resp = client.post('/login', json={'username': 'alice123', 'password': 'Password1'})
+    assert resp.status_code == 401
+
+
+def test_register_with_verified_email_completes_signup(client):
+    from core.login_utils import create_email_verification_token
+
+    token = create_email_verification_token('alice123', 'alice@example.com')
+    resp = client.post('/register', json={
+        'username': 'alice123',
+        'password': 'Password1',
+        'email': 'alice@example.com',
+        'verification_token': token,
+    })
+    assert resp.status_code == 200
+
+    from sqlmodel import Session
+    from core.database import engine
+    from schemas.wiki_user import WikiUser
+    with Session(engine) as session:
+        user = session.get(WikiUser, 'alice123')
+        assert user is not None
+        assert user.email == 'alice@example.com'
+        assert user.email_verified is True
 
     resp = client.post('/login', json={'username': 'alice123', 'password': 'Password1'})
     assert resp.status_code == 200
@@ -11,33 +49,57 @@ def test_register_and_login(client):
 
 
 def test_register_duplicate_username(client):
-    client.post('/register', json={'username': 'alice123', 'password': 'Password1'})
-    resp = client.post('/register', json={'username': 'alice123', 'password': 'Password1'})
+    from core.login_utils import create_email_verification_token
+
+    client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice@example.com'})
+    token1 = create_email_verification_token('alice123', 'alice@example.com')
+    client.post('/register', json={'username': 'alice123', 'password': 'Password1', 'email': 'alice@example.com', 'verification_token': token1})
+
+    resp = client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice2@example.com'})
     assert resp.status_code == 400
 
 
 def test_register_reserved_username(client):
-    resp = client.post('/register', json={'username': 'admin', 'password': 'Password1'})
+    from core.login_utils import create_email_verification_token
+
+    token = create_email_verification_token('admin', 'admin@example.com')
+    resp = client.post('/register', json={'username': 'admin', 'password': 'Password1', 'email': 'admin@example.com', 'verification_token': token})
     assert resp.status_code == 400
 
 
 def test_register_weak_password_too_short(client):
-    resp = client.post('/register', json={'username': 'alice123', 'password': 'short1'})
+    from core.login_utils import create_email_verification_token
+
+    client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice@example.com'})
+    token = create_email_verification_token('alice123', 'alice@example.com')
+    resp = client.post('/register', json={'username': 'alice123', 'password': 'short1', 'email': 'alice@example.com', 'verification_token': token})
     assert resp.status_code == 400
 
 
 def test_register_password_missing_digit(client):
-    resp = client.post('/register', json={'username': 'alice123', 'password': 'onlyletters'})
+    from core.login_utils import create_email_verification_token
+
+    client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice@example.com'})
+    token = create_email_verification_token('alice123', 'alice@example.com')
+    resp = client.post('/register', json={'username': 'alice123', 'password': 'onlyletters', 'email': 'alice@example.com', 'verification_token': token})
     assert resp.status_code == 400
 
 
 def test_register_invalid_username(client):
-    resp = client.post('/register', json={'username': 'ab', 'password': 'Password1'})
+    from core.login_utils import create_email_verification_token
+
+    client.post('/register/verify-email', json={'username': 'ab', 'email': 'alice@example.com'})
+    token = create_email_verification_token('ab', 'alice@example.com')
+    resp = client.post('/register', json={'username': 'ab', 'password': 'Password1', 'email': 'alice@example.com', 'verification_token': token})
     assert resp.status_code == 400
 
 
 def test_login_unknown_user_returns_same_message_as_wrong_password(client):
-    client.post('/register', json={'username': 'alice123', 'password': 'Password1'})
+    from core.login_utils import create_email_verification_token
+
+    client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice@example.com'})
+    token = create_email_verification_token('alice123', 'alice@example.com')
+    client.post('/register', json={'username': 'alice123', 'password': 'Password1', 'email': 'alice@example.com', 'verification_token': token})
 
     miss_user = client.post('/login', json={'username': 'nobody', 'password': 'Password1'})
     wrong_pw = client.post('/login', json={'username': 'alice123', 'password': 'WrongPass1'})
@@ -79,7 +141,8 @@ def test_register_works_with_migrated_legacy_schema(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     with TestClient(main.app) as client:
-        resp = client.post('/register', json={'username': 'alice123', 'password': 'Password1'})
+        token = __import__('core.login_utils', fromlist=['create_email_verification_token']).create_email_verification_token('alice123', 'alice@example.com')
+        resp = client.post('/register', json={'username': 'alice123', 'password': 'Password1', 'email': 'alice@example.com', 'verification_token': token})
         assert resp.status_code == 200
 
 
@@ -122,7 +185,11 @@ def test_bearer_header_is_accepted(client, auth_headers):
 
 
 def test_password_reset_request_is_generic(client):
-    client.post('/register', json={'username': 'alice123', 'password': 'Password1'})
+    from core.login_utils import create_email_verification_token
+
+    client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice@example.com'})
+    token = create_email_verification_token('alice123', 'alice@example.com')
+    client.post('/register', json={'username': 'alice123', 'password': 'Password1', 'email': 'alice@example.com', 'verification_token': token})
     existing = client.post('/password-reset/request', json={'username': 'alice123'})
     missing = client.post('/password-reset/request', json={'username': 'nobody'})
     assert existing.status_code == 200 and missing.status_code == 200
@@ -133,9 +200,10 @@ def test_password_reset_full_flow(client):
     from sqlmodel import Session
     from core.database import engine
     from schemas.wiki_user import WikiUser
-    from core.login_utils import create_password_reset_token
+    from core.login_utils import create_password_reset_token, create_email_verification_token
 
-    client.post('/register', json={'username': 'alice123', 'password': 'Password1'})
+    client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice@example.com'})
+    client.post('/register', json={'username': 'alice123', 'password': 'Password1', 'email': 'alice@example.com', 'verification_token': create_email_verification_token('alice123', 'alice@example.com')})
     with Session(engine) as session:
         token = create_password_reset_token('alice123', session.get(WikiUser, 'alice123').password)
 
@@ -149,9 +217,10 @@ def test_password_reset_token_is_single_use(client):
     from sqlmodel import Session
     from core.database import engine
     from schemas.wiki_user import WikiUser
-    from core.login_utils import create_password_reset_token
+    from core.login_utils import create_password_reset_token, create_email_verification_token
 
-    client.post('/register', json={'username': 'alice123', 'password': 'Password1'})
+    client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice@example.com'})
+    client.post('/register', json={'username': 'alice123', 'password': 'Password1', 'email': 'alice@example.com', 'verification_token': create_email_verification_token('alice123', 'alice@example.com')})
     with Session(engine) as session:
         token = create_password_reset_token('alice123', session.get(WikiUser, 'alice123').password)
 
@@ -218,8 +287,8 @@ def test_set_email_and_verify_flow(client, auth_headers):
 
 
 def test_email_uniqueness_conflict(client, auth_headers):
-    a_headers, _ = auth_headers('alice123')
-    b_headers, _ = auth_headers('bob12345')
+    a_headers, _ = auth_headers('alice123', email='dup1@example.com')
+    b_headers, _ = auth_headers('bob12345', email='dup2@example.com')
     assert client.put('/email', json={'email': 'dup@example.com'}, headers=a_headers).status_code == 200
     assert client.put('/email', json={'email': 'dup@example.com'}, headers=b_headers).status_code == 409
 
