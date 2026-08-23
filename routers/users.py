@@ -568,13 +568,16 @@ async def verify_email(request: Request, body: EmailVerify):
         ev = session.exec(select(EmailVerification).where(EmailVerification.token == body.token)).first()
         if not ev or (ev.expires_at and ev.expires_at < datetime.utcnow()):
             raise HTTPException(status_code=400, detail='Invalid or expired verification token.')
+
+        user = session.get(WikiUser, username)
+        if user and user.email != email:
+            raise HTTPException(status_code=400, detail='Email has changed since this token was issued.')
         if ev.verified:
             return {'message': 'Email is already verified.'}
 
         ev.verified = True
         session.add(ev)
 
-        user = session.get(WikiUser, username)
         if user and user.email == email and not user.email_verified:
             user.email_verified = True
             session.add(user)
