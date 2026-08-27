@@ -117,7 +117,7 @@ def test_register_works_with_migrated_legacy_schema(tmp_path, monkeypatch):
     monkeypatch.setenv('DB_PATH', str(db_path))
     monkeypatch.setenv('ADMIN_USERNAME', '')
     monkeypatch.setenv('ADMIN_PASSWORD', '')
-    monkeypatch.setenv('JWT_SECRET_KEY', 'testsecretkey')
+    monkeypatch.setenv('JWT_SECRET_KEY', 'test-jwt-secret-key-32-bytes-long')
 
     with sqlite3.connect(db_path) as conn:
         conn.execute(

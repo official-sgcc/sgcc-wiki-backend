@@ -25,7 +25,7 @@ def client(monkeypatch):
     monkeypatch.setenv('DB_PATH', db_path)
     monkeypatch.setenv('ADMIN_USERNAME', '')
     monkeypatch.setenv('ADMIN_PASSWORD', '')
-    monkeypatch.setenv('JWT_SECRET_KEY', 'testsecretkey')
+    monkeypatch.setenv('JWT_SECRET_KEY', 'test-jwt-secret-key-32-bytes-long')
 
     main = reload_app()
 
