@@ -377,8 +377,11 @@ INSERT INTO wikiuser (username, password, permission, bio, email, email_verified
     SELECT username, password, permission, bio, email, email_verified, totp_secret, totp_enabled, totp_last_step FROM wikiuser_legacy;
 DROP TABLE wikiuser_legacy;
 CREATE UNIQUE INDEX ix_wikiuser_email ON wikiuser (email);
+
 COMMIT;
 PRAGMA foreign_keys=on;
 ```
 
 데이터가 의미 있게 쌓이면 Alembic 도입을 검토하세요.
+
+cicd 확인용 문구#1
