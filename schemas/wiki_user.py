@@ -38,8 +38,14 @@ class EmailUpdate(BaseModel):
 class BioUpdate(BaseModel):
     bio: str
 
+class PermissionUpdate(BaseModel):
+    permission: str
+
 class EmailVerify(BaseModel):
     token: str
+
+ALLOWED_USER_PERMISSIONS = ['admin', 'club_member', 'login_user']
+
 
 class WikiUser(SQLModel, table=True):
     username: str = Field(primary_key=True)

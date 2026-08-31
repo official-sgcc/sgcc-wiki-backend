@@ -246,6 +246,8 @@ IP 기준이며 초과 시 `429`입니다.
 | `POST /login/2fa` | - | 바디: `mfa_token`, `code` → `{token}` |
 | `GET /users/{username}` | 선택 | 프로필 + `edit_versions`(작성한 문서 버전, 최신순). `password`/`totp_secret`은 항상 제외, `email`은 본인 조회에만 포함 |
 | `GET /admin/users` | admin | 사용자 목록 |
+| `GET /admin/permissions` | admin | 사용자 권한 종류 목록. 응답: `{'permissions': ['admin', 'club_member', 'login_user']}` |
+| `PUT /admin/users/{username}/permission` | admin | 권한 변경. 바디: `permission`. 허용 값: `admin` / `club_member` / `login_user` |
 | `PUT /users/{username}/bio` | 필요 | 소개문 수정. 바디: `bio` |
 | `POST /2fa/setup` | 필요 | `{secret, otpauth_uri}` |
 | `POST /2fa/enable` | 필요 | 바디: `code` |

@@ -174,6 +174,30 @@ def test_update_bio_for_self_and_read_it(client, auth_headers):
     assert public['bio'] == 'Hello world'
 
 
+def test_admin_can_list_permissions_and_update_user_permission(client, auth_headers, admin_headers):
+    admin, _ = admin_headers
+    user_headers, username = auth_headers('alice123')
+
+    list_resp = client.get('/admin/permissions', headers=admin)
+    assert list_resp.status_code == 200
+    assert list_resp.json()['permissions'] == ['admin', 'club_member', 'login_user']
+
+    update_resp = client.put(f'/admin/users/{username}/permission', json={'permission': 'club_member'}, headers=admin)
+    assert update_resp.status_code == 200
+    assert update_resp.json()['permission'] == 'club_member'
+
+    from sqlmodel import Session
+    from core.database import engine
+    from schemas.wiki_user import WikiUser
+    with Session(engine) as session:
+        user = session.get(WikiUser, username)
+        assert user is not None
+        assert user.permission == 'club_member'
+
+    reject_resp = client.put(f'/admin/users/{username}/permission', json={'permission': 'admin'}, headers=user_headers)
+    assert reject_resp.status_code == 403
+
+
 def test_bearer_header_is_accepted(client, auth_headers):
     # 계약: get_current_user는 'auth:'와 'Authorization: Bearer' 둘 다 받아야 한다.
     # 나머지 테스트가 auth만 쓰므로 Bearer 경로는 여기서만 지킨다.

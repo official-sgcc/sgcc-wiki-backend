@@ -21,7 +21,8 @@ from schemas.wiki_doc import WikiDocVersion
 from schemas.wiki_user import (
     WikiUser, UserRegisterForm, RegisterEmailRequest, UserIdAndPassword,
     PasswordResetRequest, PasswordResetConfirm, TotpCode, TotpLogin,
-    EmailUpdate, BioUpdate, EmailVerify,
+    EmailUpdate, BioUpdate, EmailVerify, PermissionUpdate,
+    ALLOWED_USER_PERMISSIONS,
 )
 from schemas.wiki_user import EmailVerification
 
@@ -212,6 +213,50 @@ async def list_users(current_user: WikiUser = Depends(get_current_user)):
             data = u.model_dump(exclude={'password', 'totp_secret', 'totp_enabled', 'totp_last_step'})
             result.append(data)
         return result
+
+@router.get('/admin/permissions')
+async def list_user_permissions(current_user: WikiUser = Depends(get_current_user)):
+    """관리자 전용: 허용되는 사용자 권한 종류 목록을 조회한다.
+
+    Returns:
+        dict: `{'permissions': ['admin', 'club_member', 'login_user']}`
+    """
+    if current_user is None or current_user.permission != 'admin':
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Admin permission required.')
+
+    return {'permissions': ALLOWED_USER_PERMISSIONS}
+
+
+@router.put('/admin/users/{username}/permission')
+async def update_user_permission(username: str, body: PermissionUpdate, current_user: WikiUser = Depends(get_current_user)):
+    """관리자 전용: 특정 사용자의 권한을 변경한다.
+
+    Args:
+        username: 대상 사용자 이름.
+        body: `{permission}`.
+        current_user: 인증된 관리자.
+
+    Returns:
+        dict: `{'username': ..., 'permission': ...}`
+    """
+    if current_user is None or current_user.permission != 'admin':
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Admin permission required.')
+
+    if body.permission not in ALLOWED_USER_PERMISSIONS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Unsupported permission value.')
+
+    with Session(engine) as session:
+        user = session.get(WikiUser, username)
+        if not user:
+            raise HTTPException(status_code=404, detail='Cannot find user with the corresponding username.')
+
+        user.permission = body.permission
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        logger.info('user permission updated: %s -> %s', username, user.permission)
+        return {'username': user.username, 'permission': user.permission}
+
 
 @router.put('/users/{username}/bio')
 async def update_user_bio(username: str, body: BioUpdate, current_user: WikiUser = Depends(get_current_user)):
