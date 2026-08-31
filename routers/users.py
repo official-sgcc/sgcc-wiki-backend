@@ -194,6 +194,25 @@ async def get_user_info(username: str, current_user: WikiUser = Depends(get_curr
         user_data['edit_versions'] = edit_versions
         return user_data
 
+
+@router.get('/admin/users')
+async def list_users(current_user: WikiUser = Depends(get_current_user)):
+    """관리자 전용: 사용자 목록 출력(가벼운 정보만).
+
+    Returns:
+        list[dict]: 각 사용자에 대해 `username`, `permission`, `bio`, `email`, `email_verified`를 반환.
+    """
+    if current_user is None or current_user.permission != 'admin':
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Admin permission required.')
+
+    with Session(engine) as session:
+        users = session.exec(select(WikiUser)).all()
+        result = []
+        for u in users:
+            data = u.model_dump(exclude={'password', 'totp_secret', 'totp_enabled', 'totp_last_step'})
+            result.append(data)
+        return result
+
 @router.put('/users/{username}/bio')
 async def update_user_bio(username: str, body: BioUpdate, current_user: WikiUser = Depends(get_current_user)):
     """본인 계정의 소개 문구를 수정한다. (로그인 필요)

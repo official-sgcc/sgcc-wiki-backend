@@ -11,6 +11,7 @@ class WikiDoc(SQLModel, table=True):
     content: str
     category: WikiCategory = Field(sa_type=JSON)
     tags: list[WikiTag] = Field(default_factory=list, sa_type=JSON)
+    view_count: int = Field(default=0)
     created_by: str | None = None
     updated_at: datetime
     permissions: Permissions | None = Relationship(

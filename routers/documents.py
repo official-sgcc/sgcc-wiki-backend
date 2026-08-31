@@ -147,6 +147,10 @@ async def get_document(title: str):
         doc = session.get(WikiDoc, title)
         if not doc:
             raise HTTPException(status_code=404, detail='Cannot find a document with the corresponding name.')
+        doc.view_count = (doc.view_count or 0) + 1
+        session.add(doc)
+        session.commit()
+        session.refresh(doc)
         return doc
 
 @router.put('/documents/{title}')
@@ -269,6 +273,7 @@ async def move_document(title: str, move_data: WikiDocMove, current_user: WikiUs
             content=doc.content,
             category=doc.category,
             tags=doc.tags,
+            view_count=(doc.view_count or 0),
             created_by=doc.created_by,
             updated_at=doc.updated_at,
         )
