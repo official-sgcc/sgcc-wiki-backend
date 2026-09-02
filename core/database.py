@@ -16,3 +16,20 @@ from schemas.categories import WikiCategory
 
 engine = create_engine(f'sqlite:///{DB_PATH}')
 SQLModel.metadata.create_all(engine)
+
+
+def migrate_legacy_document_schema() -> None:
+    """기존 SQLite 문서 테이블에 신규 컬럼을 데이터 손실 없이 보완한다."""
+    with engine.begin() as connection:
+        columns = {
+            row[1]
+            for row in connection.exec_driver_sql('PRAGMA table_info(wikidoc)')
+        }
+        if 'view_count' not in columns:
+            connection.exec_driver_sql(
+                'ALTER TABLE wikidoc '
+                'ADD COLUMN view_count INTEGER NOT NULL DEFAULT 0'
+            )
+
+
+migrate_legacy_document_schema()

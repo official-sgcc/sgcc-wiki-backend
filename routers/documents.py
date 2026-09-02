@@ -130,6 +130,55 @@ async def create_document(doc_in: WikiDocCreate, current_user: WikiUser = Depend
         logger.info('document created: %s by %s', doc.title, current_user.username)
         return {'message': f'The document named {doc.title} has been created.'}
 
+
+# 제목에 '/' 같은 경로 구분자가 포함되어도 안전하게 접근할 수 있도록
+# 기존 path parameter API와 동일한 동작을 query parameter API로도 제공한다.
+@router.get('/documents/by-title')
+async def get_document_by_title(title: str):
+    return await get_document(title)
+
+
+@router.put('/documents/by-title')
+async def update_document_by_title(
+    update_data: WikiDocUpdate,
+    title: str,
+    current_user: WikiUser = Depends(get_current_user),
+):
+    return await update_document(title, update_data, current_user)
+
+
+@router.delete('/documents/by-title')
+async def delete_document_by_title(
+    title: str,
+    current_user: WikiUser = Depends(get_current_user),
+):
+    return await delete_document(title, current_user)
+
+
+@router.put('/documents/by-title/move')
+async def move_document_by_title(
+    move_data: WikiDocMove,
+    title: str,
+    current_user: WikiUser = Depends(get_current_user),
+):
+    return await move_document(title, move_data, current_user)
+
+
+@router.get('/documents/by-title/versions')
+async def get_document_versions_by_title(title: str):
+    return await get_document_versions(title)
+
+
+@router.get('/documents/by-title/version')
+async def get_document_version_by_title(title: str, version_number: int):
+    return await get_document_version(title, version_number)
+
+
+@router.get('/documents/by-title/diff')
+async def get_document_update_diff_by_title(title: str, version_number: int):
+    return await get_document_update_diff(title, version_number)
+
+
 @router.get('/documents/{title}')
 async def get_document(title: str):
     """제목으로 문서 하나를 조회한다. (인증 불필요)

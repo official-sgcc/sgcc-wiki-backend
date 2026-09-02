@@ -3,6 +3,9 @@ def _prep_tag_and_category(client, headers):
     client.post('/categories', json={'name': 'General'}, headers=headers)
 
 
+import sqlite3
+
+
 def test_create_document_requires_auth(client):
     resp = client.post('/documents', json={
         'title': 'Doc1',
@@ -232,3 +235,108 @@ def test_get_document_diff_rejects_first_version(client, auth_headers):
 
     resp = client.get('/documents/Doc1/diff/1')
     assert resp.status_code == 400
+
+
+def test_slash_title_query_parameter_lifecycle(client, auth_headers, admin_headers):
+    headers, _ = auth_headers('alice123')
+    admin, _ = admin_headers
+    _prep_tag_and_category(client, headers)
+    title = 'React/Router 사용법'
+    renamed_title = 'React/Router 심화'
+
+    created = client.post('/documents', json={
+        'title': title,
+        'content': 'v1',
+        'category': {'name': 'General'},
+        'tags': [],
+    }, headers=headers)
+    assert created.status_code == 200
+
+    detail = client.get('/documents/by-title', params={'title': title})
+    assert detail.status_code == 200
+    assert detail.json()['title'] == title
+
+    updated = client.put(
+        '/documents/by-title',
+        params={'title': title},
+        json={'content': 'v2'},
+        headers=headers,
+    )
+    assert updated.status_code == 200
+
+    versions = client.get('/documents/by-title/versions', params={'title': title})
+    assert versions.status_code == 200
+    assert len(versions.json()) == 2
+
+    version = client.get('/documents/by-title/version', params={
+        'title': title,
+        'version_number': 2,
+    })
+    assert version.status_code == 200
+    assert version.json()['content'] == 'v2'
+
+    diff = client.get('/documents/by-title/diff', params={
+        'title': title,
+        'version_number': 2,
+    })
+    assert diff.status_code == 200
+
+    moved = client.put(
+        '/documents/by-title/move',
+        params={'title': title},
+        json={'new_title': renamed_title},
+        headers=admin,
+    )
+    assert moved.status_code == 200
+    assert client.get(
+        '/documents/by-title',
+        params={'title': renamed_title},
+    ).status_code == 200
+
+    deleted = client.delete(
+        '/documents/by-title',
+        params={'title': renamed_title},
+        headers=admin,
+    )
+    assert deleted.status_code == 200
+
+
+def test_legacy_document_schema_adds_view_count(tmp_path, monkeypatch):
+    db_path = tmp_path / 'legacy-documents.db'
+    monkeypatch.setenv('DB_PATH', str(db_path))
+    monkeypatch.setenv('ADMIN_USERNAME', '')
+    monkeypatch.setenv('ADMIN_PASSWORD', '')
+    monkeypatch.setenv('JWT_SECRET_KEY', 'test-jwt-secret-key-32-bytes-long')
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            'CREATE TABLE wikidoc ('
+            'title VARCHAR PRIMARY KEY, '
+            'content VARCHAR NOT NULL, '
+            'category JSON NOT NULL, '
+            'tags JSON NOT NULL, '
+            'created_by VARCHAR, '
+            'updated_at DATETIME NOT NULL'
+            ')'
+        )
+        connection.execute(
+            "INSERT INTO wikidoc VALUES "
+            "('legacy/document', 'content', '{}', '[]', NULL, CURRENT_TIMESTAMP)"
+        )
+        connection.commit()
+
+    from tests.conftest import reload_app
+    reload_app()
+
+    with sqlite3.connect(db_path) as connection:
+        columns = {
+            row[1]: row
+            for row in connection.execute('PRAGMA table_info(wikidoc)')
+        }
+        stored_count = connection.execute(
+            'SELECT view_count FROM wikidoc WHERE title = ?',
+            ('legacy/document',),
+        ).fetchone()[0]
+
+    assert columns['view_count'][3] == 1
+    assert stored_count == 0

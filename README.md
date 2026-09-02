@@ -233,6 +233,13 @@ IP 기준이며 초과 시 `429`입니다.
 | `GET /documents/{title}/diff/{n}` | - | `n`번 버전과 직전 버전의 본문 diff. `(op, text)` 목록(op: -1 삭제 / 0 유지 / 1 추가). `n <= 1`이면 400 |
 | `GET /search` | - | `keyword`(필수) + `search_type` = `title`(기본) / `title_content` / `tag` |
 
+- 제목에 `/` 등 경로 구분자가 포함될 수 있으므로 신규 클라이언트는 쿼리 방식 API를 사용합니다.
+  - 상세·수정·삭제: `GET|PUT|DELETE /documents/by-title?title=...`
+  - 제목 이동: `PUT /documents/by-title/move?title=...`
+  - 버전 목록: `GET /documents/by-title/versions?title=...`
+  - 특정 버전: `GET /documents/by-title/version?title=...&version_number=...`
+  - 버전 차이: `GET /documents/by-title/diff?title=...&version_number=...`
+- 기존 `{title}` 경로 API는 이전 클라이언트 호환을 위해 유지됩니다.
 - 문서 생성·수정 시 카테고리는 미리 존재해야 하고(없으면 400), **없는 태그는 자동 생성**됩니다.
 - 동시 수정으로 버전 번호가 충돌하면 최대 3회 재시도하고, 그래도 실패하면 409입니다.
 - 태그 검색(`search_type=tag`)은 **정확 일치**입니다 — `Python`으로 검색해도 `PythonDev` 문서는 나오지 않습니다.
