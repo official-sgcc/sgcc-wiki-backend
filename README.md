@@ -325,6 +325,7 @@ IP 기준이며 초과 시 `429`입니다.
 | `smtp` | `smtplib` + STARTTLS, 10초 타임아웃 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `EMAIL_FROM` |
 | `log` | 발송하지 않고 본문(링크 포함)을 로그에 출력 | 없음(개발 기본값) |
 
+- 메일은 텍스트와 HTML 두 벌로 나갑니다. HTML은 버튼 하나짜리 공용 템플릿(`render_email_html`)이며, HTML을 표시하지 않는 클라이언트에는 텍스트 본문이 보입니다.
 - 네트워크 오류·5xx·429는 5초, 30초 후 두 번 재시도합니다. 잘못된 API 키·미인증 도메인·수신자 거부 같은 4xx는 재시도하지 않고 바로 실패 로그를 남깁니다.
 - Resend 요청에는 발송마다 고유한 `Idempotency-Key`를 실어, 타임아웃 뒤 재시도해도 같은 메일이 두 번 나가지 않습니다.
 - 발송 한도(`EMAIL_DAILY_LIMIT`, `EMAIL_COOLDOWN_SECONDS`)는 프로세스 메모리에서 세므로 재시작하면 초기화되고, 여러 프로세스를 띄우면 프로세스마다 따로 셉니다.

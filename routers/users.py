@@ -17,7 +17,7 @@ from core.login_utils import (
     generate_totp_secret, totp_provisioning_uri, matched_totp_step,
     DUMMY_PASSWORD_HASH, PASSWORD_RESET_EXPIRE_MINUTES,
 )
-from core.maintenance import reserve_email_slot, send_email, send_email_now, send_email_verification
+from core.maintenance import reserve_email_slot, send_email_verification, send_password_reset_email, send_test_email_now
 from schemas.wiki_doc import WikiDocVersion
 from schemas.wiki_user import (
     WikiUser, UserRegisterForm, RegisterEmailRequest, UserIdAndPassword,
@@ -398,11 +398,7 @@ async def request_password_reset(request: Request, reset_in: PasswordResetReques
         if user and user.email and user.email_verified:
             token = create_password_reset_token(user.username, user.password)
             reset_link = f'{FRONTEND_URL}/reset-password?token={token}'
-            send_email(
-                user.email,
-                'SGCC Wiki 비밀번호 재설정',
-                f'아래 링크에서 비밀번호를 재설정하세요 (30분 내 유효):\n\n{reset_link}',
-            )
+            send_password_reset_email(user.email, reset_link)
             logger.info('password reset requested: %s', user.username)
     return {'message': 'If the account exists, a password reset link has been sent.'}
 
@@ -645,12 +641,7 @@ async def send_test_email(request: Request, body: EmailUpdate, current_user: Wik
     if not reserve_email_slot(body.email):
         raise HTTPException(status_code=429, detail='Too many emails requested for this address. Please try again later.')
     try:
-        result = await asyncio.to_thread(
-            send_email_now,
-            body.email,
-            'SGCC Wiki 메일 테스트',
-            '이 메일이 보이면 SGCC Wiki 메일 설정이 정상입니다.',
-        )
+        result = await asyncio.to_thread(send_test_email_now, body.email)
     except Exception as exc:
         logger.warning('test email failed: to=%s: %s', body.email, exc)
         raise HTTPException(status_code=502, detail=f'Email delivery failed: {exc}')

@@ -62,7 +62,30 @@ def test_verification_email_goes_through_resend_api(client, monkeypatch):
     assert call['json']['from'] == 'no-reply@sgcc.test'
     assert call['json']['to'] == ['alice@example.com']
     assert '/verify-email?token=' in call['json']['text']
+    # HTML 본문도 함께 가고, 텍스트와 같은 링크를 담는다.
+    html = call['json']['html']
+    assert html.startswith('<!DOCTYPE html>')
+    assert '이메일 인증하기' in html
+    link = call['json']['text'].split('\n\n')[-1]
+    assert f'href="{link}"' in html
     assert _count_verifications('alice@example.com') == 1
+
+
+def test_password_reset_email_is_html_with_reset_link(client, auth_headers, monkeypatch):
+    import core.maintenance as maintenance
+
+    _, username = auth_headers('alice123')
+    calls = _use_resend(monkeypatch, [FakeResponse(200, {'id': 'msg_reset'})])
+    monkeypatch.setattr(maintenance, 'EMAIL_COOLDOWN_SECONDS', 0)
+
+    assert client.post('/password-reset/request', json={'username': username}).status_code == 200
+    assert len(calls) == 1
+    payload = calls[0]['json']
+    assert payload['subject'] == 'SGCC Wiki 비밀번호 재설정'
+    assert '/reset-password?token=' in payload['text']
+    assert '비밀번호 재설정하기' in payload['html']
+    link = payload['text'].split('\n\n')[-1]
+    assert f'href="{link}"' in payload['html']
 
 
 def test_transient_failure_is_retried(client, monkeypatch):
@@ -182,7 +205,7 @@ def test_smtp_provider_uses_timeout_starttls_and_login(client, monkeypatch):
             events.append(('login', user, password))
 
         def send_message(self, msg):
-            events.append(('send', msg['From'], msg['To'], msg['Message-ID']))
+            events.append(('send', msg['From'], msg['To'], msg['Message-ID'], msg.get_content_type()))
 
     monkeypatch.setattr(maintenance, 'EMAIL_PROVIDER', 'smtp')
     monkeypatch.setattr(maintenance, 'SMTP_HOST', 'smtp.example.com')
@@ -192,7 +215,7 @@ def test_smtp_provider_uses_timeout_starttls_and_login(client, monkeypatch):
     monkeypatch.setattr(maintenance, 'EMAIL_FROM', 'club@example.com')
     monkeypatch.setattr(maintenance.smtplib, 'SMTP', FakeSMTP)
 
-    result = maintenance.send_email_now('to@example.com', 'subject', 'body')
+    result = maintenance.send_email_now('to@example.com', 'subject', 'body', '<p>hi</p>')
     assert result['provider'] == 'smtp'
     message_id = result['message_id']
 
@@ -201,3 +224,5 @@ def test_smtp_provider_uses_timeout_starttls_and_login(client, monkeypatch):
     assert events[2] == ('login', 'club@example.com', 'app-password')
     assert events[3][:3] == ('send', 'club@example.com', 'to@example.com')
     assert events[3][3] == message_id
+    # 텍스트 + HTML 두 파트로 보낸다(HTML을 못 보는 클라이언트는 텍스트를 쓴다).
+    assert events[3][4] == 'multipart/alternative'

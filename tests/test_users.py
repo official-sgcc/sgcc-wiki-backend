@@ -332,10 +332,10 @@ def test_password_reset_requires_verified_email(client, auth_headers, monkeypatc
     import routers.users
     from core.login_utils import create_email_verification_token
 
-    # send_email을 가로채 실제 발송(링크) 여부를 관찰한다. 응답은 항상 200이라
+    # send_password_reset_email을 가로채 실제 발송(링크) 여부를 관찰한다. 응답은 항상 200이라
     # 발송 여부는 이 훅으로만 확인할 수 있다.
     sent = []
-    monkeypatch.setattr(routers.users, 'send_email', lambda to, subject, body: sent.append(to))
+    monkeypatch.setattr(routers.users, 'send_password_reset_email', lambda to, link: sent.append(to) or True)
 
     headers, username = auth_headers('alice123')
     client.put('/email', json={'email': 'alice@example.com'}, headers=headers)  # unverified

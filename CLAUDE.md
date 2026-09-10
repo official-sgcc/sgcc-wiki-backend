@@ -51,7 +51,7 @@ python3 -m py_compile main.py core/*.py routers/*.py schemas/*.py
 
 - `load_dotenv()`는 **`os.getenv` 호출보다 반드시 먼저**. `core/config.py`/`core/login_utils.py` 상단의 호출 패턴을 깨지 말 것 (과거에 순서가 뒤바뀌어 `FRONTEND_URL`이 적용 안 됐던 적 있음). 환경변수는 각 모듈에서 `os.getenv`로 다시 읽지 말고 `core/config.py`에서 가져다 쓴다
 - `engine = create_engine(...)`과 `SQLModel.metadata.create_all(engine)`은 `core/database.py` 임포트 시점에 실행된다. 그래서 테스트는 `DB_PATH`를 바꾼 뒤 `sys.modules`에서 앱 모듈(`main`/`core.*`/`routers.*`)을 지우고 다시 임포트한다(`tests/conftest.py`의 `reload_app`). **`schemas`는 지우면 안 된다** — 테이블 클래스가 같은 metadata에 재등록되며 에러가 난다
-- 라우터는 `from core.maintenance import send_email`처럼 이름을 자기 네임스페이스로 가져온다. 테스트에서 monkeypatch할 때는 원본 모듈이 아니라 **사용하는 쪽**(`routers.users.send_email`)을 패치할 것. `send_email`/`send_email_verification`은 bool을 반환하므로 스텁도 `True`를 돌려줘야 핸들러가 429를 내지 않는다
+- 라우터는 `from core.maintenance import send_email`처럼 이름을 자기 네임스페이스로 가져온다. 테스트에서 monkeypatch할 때는 원본 모듈이 아니라 **사용하는 쪽**(`routers.users.send_password_reset_email`)을 패치할 것. `send_email`/`send_email_verification`/`send_password_reset_email`은 bool을 반환하므로 스텁도 `True`를 돌려줘야 핸들러가 429를 내지 않는다
 - `JWT_SECRET_KEY`가 없으면 `login_utils` 임포트 단계에서 `RuntimeError`로 기동을 거부한다(fail-fast). 기본 서명 키로 돌아가는 fallback을 넣지 말 것
 
 ### 인증 헤더 (이중 지원)
@@ -70,7 +70,7 @@ python3 -m py_compile main.py core/*.py routers/*.py schemas/*.py
 
 ### 메일 발송
 
-핸들러는 provider를 직접 호출하지 않고 `core/maintenance.py`의 `send_email` / `send_email_verification`만 쓴다. 이 함수들은 **한도 검사 → 백그라운드 스레드 발송**을 하고 즉시 bool을 돌려준다.
+핸들러는 provider를 직접 호출하지 않고 `core/maintenance.py`의 `send_email_verification` / `send_password_reset_email`(공용 `send_email`)만 쓴다. 메일 본문은 텍스트 + HTML 두 벌이며 HTML은 `render_email_html` 공용 템플릿으로만 만든다(사용자 입력은 반드시 escape). 이 함수들은 **한도 검사 → 백그라운드 스레드 발송**을 하고 즉시 bool을 돌려준다.
 
 - provider는 `EMAIL_PROVIDER`(`log`/`smtp`/`resend`) 하나로 고르고 `_PROVIDERS` 딕셔너리에 매핑돼 있다. 새 provider는 `_deliver_xxx(send_id, to, subject, body) -> message_id` 시그니처로 추가하고 config의 검증 목록에도 넣을 것
 - 재시도 정책: 네트워크 오류·5xx·429만 `EMAIL_RETRY_DELAYS`만큼 재시도, 4xx·인증 실패·수신자 거부는 `PermanentEmailError`로 즉시 포기. 재시도에도 같은 `send_id`(Resend `Idempotency-Key`)를 쓴다
