@@ -3,42 +3,188 @@
 import os
 import smtplib
 import sqlite3
+import threading
+import time
+from collections import deque
 from datetime import datetime, timedelta
 from email.message import EmailMessage
+from email.utils import make_msgid
+from uuid import uuid4
+import httpx
 from sqlmodel import Session
 from core.config import (
     BACKUP_DIR, DB_PATH, FRONTEND_URL, logger,
-    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM,
+    EMAIL_PROVIDER, EMAIL_FROM, EMAIL_DAILY_LIMIT, EMAIL_COOLDOWN_SECONDS, RESEND_API_KEY,
+    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD,
 )
 from core.database import engine
 from core.login_utils import create_email_verification_token, hash_password
 from schemas.wiki_user import WikiUser, EmailVerification
 
-def send_email(to: str, subject: str, body: str):
-    """이메일을 발송한다. SMTP가 설정돼 있으면 실제 전송, 아니면 로그로 대체한다.
+RESEND_API_URL = 'https://api.resend.com/emails'
+EMAIL_SEND_TIMEOUT_SECONDS = 10
+# 일시 장애(네트워크 오류·5xx·429) 재시도 전 대기 시간(초). 튜플 길이가 곧 재시도 횟수.
+EMAIL_RETRY_DELAYS = (5, 30)
 
-    SMTP_HOST 환경변수가 없으면(개발/미설정) 실제 발송 대신 내용을 로그에 남긴다.
-    비밀번호 재설정 링크가 여기로 흐르므로, 로그를 보면 흐름을 확인할 수 있다.
-    나중에 SMTP_* 환경변수만 채우면 코드 변경 없이 실제 발송으로 전환된다.
+# 발송 한도 추적용 인메모리 상태. 재시작하면 초기화되지만 동아리 규모에는 충분하다.
+_send_lock = threading.Lock()
+_recent_sends: deque[datetime] = deque()
+_last_send_by_recipient: dict[str, datetime] = {}
+
+
+class PermanentEmailError(Exception):
+    """재시도해도 성공할 수 없는 발송 실패(잘못된 주소, 미인증 도메인, 인증 정보 오류)."""
+
+
+def _deliver_log(send_id: str, to: str, subject: str, body: str) -> str | None:
+    """실제 발송 대신 내용을 로그에 남긴다(개발·미설정 환경)."""
+    logger.info('email provider=log; would send to %s [%s]:\n%s', to, subject, body)
+    return None
+
+
+def _deliver_smtp(send_id: str, to: str, subject: str, body: str) -> str:
+    """SMTP(STARTTLS, 587)로 발송하고 Message-ID를 반환한다.
+
+    Raises:
+        PermanentEmailError: 인증 실패·수신자 거부처럼 재시도가 무의미한 오류.
+        smtplib.SMTPException | OSError: 연결·타임아웃 등 일시 오류(호출측에서 재시도).
     """
-    if not SMTP_HOST:
-        logger.info('email not configured; would send to %s [%s]:\n%s', to, subject, body)
-        return
-
     msg = EmailMessage()
-    msg['From'] = SMTP_FROM
+    msg['From'] = EMAIL_FROM
     msg['To'] = to
     msg['Subject'] = subject
+    msg['Message-ID'] = (message_id := make_msgid(idstring=send_id))
     msg.set_content(body)
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-        server.starttls()
-        if SMTP_USER:
-            server.login(SMTP_USER, SMTP_PASSWORD)
-        server.send_message(msg)
-    logger.info('email sent to %s [%s]', to, subject)
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=EMAIL_SEND_TIMEOUT_SECONDS) as server:
+            server.starttls()
+            if SMTP_USER:
+                server.login(SMTP_USER, SMTP_PASSWORD)
+            server.send_message(msg)
+    except (smtplib.SMTPAuthenticationError, smtplib.SMTPRecipientsRefused) as exc:
+        raise PermanentEmailError(str(exc)) from exc
+    return message_id
 
-def send_email_verification(username: str, email: str):
-    """해당 이메일로 인증 링크를 발송한다."""
+
+def _deliver_resend(send_id: str, to: str, subject: str, body: str) -> str | None:
+    """Resend HTTP API로 발송하고 Resend가 준 메시지 ID를 반환한다.
+
+    Idempotency-Key에 send_id를 실어 타임아웃 뒤 재시도해도 같은 메일이 두 번 나가지 않게 한다.
+
+    Raises:
+        PermanentEmailError: 4xx 응답(잘못된 키, 미인증 도메인, 잘못된 주소 등).
+        RuntimeError: 네트워크 오류·5xx·429(호출측에서 재시도).
+    """
+    try:
+        resp = httpx.post(
+            RESEND_API_URL,
+            headers={'Authorization': f'Bearer {RESEND_API_KEY}', 'Idempotency-Key': f'sgcc-wiki/{send_id}'},
+            json={'from': EMAIL_FROM, 'to': [to], 'subject': subject, 'text': body},
+            timeout=EMAIL_SEND_TIMEOUT_SECONDS,
+        )
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f'resend request failed: {exc}') from exc
+    if resp.status_code == 429 or resp.status_code >= 500:
+        raise RuntimeError(f'resend returned {resp.status_code}: {resp.text[:200]}')
+    if resp.status_code >= 400:
+        raise PermanentEmailError(f'resend rejected: {resp.status_code} {resp.text[:200]}')
+    return resp.json().get('id')
+
+
+_PROVIDERS = {'log': _deliver_log, 'smtp': _deliver_smtp, 'resend': _deliver_resend}
+
+
+def _deliver_with_retry(send_id: str, to: str, subject: str, body: str):
+    """백그라운드 스레드에서 실행되는 실제 발송. 일시 장애는 EMAIL_RETRY_DELAYS만큼 재시도한다."""
+    deliver = _PROVIDERS[EMAIL_PROVIDER]
+    for attempt in range(len(EMAIL_RETRY_DELAYS) + 1):
+        try:
+            message_id = deliver(send_id, to, subject, body)
+        except PermanentEmailError as exc:
+            logger.error('email failed permanently: send_id=%s to=%s [%s]: %s', send_id, to, subject, exc)
+            return
+        except Exception as exc:
+            if attempt == len(EMAIL_RETRY_DELAYS):
+                logger.error('email failed after %d attempts: send_id=%s to=%s [%s]: %s', attempt + 1, send_id, to, subject, exc)
+                return
+            delay = EMAIL_RETRY_DELAYS[attempt]
+            logger.warning('email send failed (attempt %d), retrying in %ds: send_id=%s to=%s: %s', attempt + 1, delay, send_id, to, exc)
+            time.sleep(delay)
+        else:
+            logger.info('email sent: send_id=%s to=%s [%s] provider=%s message_id=%s', send_id, to, subject, EMAIL_PROVIDER, message_id)
+            return
+
+
+def _run_in_background(func, *args):
+    """발송을 요청 처리와 분리해 별도 스레드에서 돌린다. 테스트에서는 동기 실행으로 교체한다."""
+    threading.Thread(target=func, args=args, daemon=True).start()
+
+
+def reserve_email_slot(to: str) -> bool:
+    """수신자 쿨다운과 24시간 발송 상한을 검사하고, 통과하면 슬롯을 소비한다.
+
+    비로그인 엔드포인트가 임의 주소로 메일을 보낼 수 있으므로, 도메인 평판과
+    발송 서비스 무료 한도를 지키기 위한 최소 안전장치다.
+    """
+    now = datetime.utcnow()
+    with _send_lock:
+        while _recent_sends and _recent_sends[0] < now - timedelta(days=1):
+            _recent_sends.popleft()
+        last = _last_send_by_recipient.get(to)
+        if last and last > now - timedelta(seconds=EMAIL_COOLDOWN_SECONDS):
+            logger.warning('email suppressed (cooldown %ds): to=%s', EMAIL_COOLDOWN_SECONDS, to)
+            return False
+        if len(_recent_sends) >= EMAIL_DAILY_LIMIT:
+            logger.warning('email suppressed (daily limit %d reached): to=%s', EMAIL_DAILY_LIMIT, to)
+            return False
+        if len(_last_send_by_recipient) > 1000:
+            cutoff = now - timedelta(seconds=EMAIL_COOLDOWN_SECONDS)
+            for key in [k for k, v in _last_send_by_recipient.items() if v < cutoff]:
+                del _last_send_by_recipient[key]
+        _recent_sends.append(now)
+        _last_send_by_recipient[to] = now
+        return True
+
+
+def _dispatch_email(to: str, subject: str, body: str):
+    """발송 ID를 붙여 백그라운드 발송을 시작한다(한도 검사 없음)."""
+    send_id = uuid4().hex
+    logger.info('email queued: send_id=%s to=%s [%s] provider=%s', send_id, to, subject, EMAIL_PROVIDER)
+    _run_in_background(_deliver_with_retry, send_id, to, subject, body)
+
+
+def send_email(to: str, subject: str, body: str) -> bool:
+    """이메일 발송을 예약한다. 한도(수신자 쿨다운·일일 상한)에 걸리면 False.
+
+    실제 전송은 EMAIL_PROVIDER(log/smtp/resend)로 백그라운드 스레드에서 수행하므로
+    응답을 막지 않고, 전송 실패도 사용자 응답에 영향을 주지 않는다(로그에만 남는다).
+
+    Args:
+        to: 수신자 주소.
+        subject: 제목.
+        body: 본문(plain text).
+
+    Returns:
+        bool: 발송이 예약됐으면 True, 한도에 걸려 건너뛰었으면 False.
+    """
+    if not reserve_email_slot(to):
+        return False
+    _dispatch_email(to, subject, body)
+    return True
+
+
+def send_email_verification(username: str, email: str) -> bool:
+    """해당 이메일로 인증 링크를 발송하고 EmailVerification 레코드를 남긴다.
+
+    Args:
+        username: 인증 대상 사용자명(가입 전이어도 됨).
+        email: 인증 링크를 받을 주소.
+
+    Returns:
+        bool: 발송이 예약됐으면 True. 한도에 걸리면 레코드를 만들지 않고 False.
+    """
+    if not reserve_email_slot(email):
+        return False
     token = create_email_verification_token(username, email)
     expires = datetime.utcnow() + timedelta(hours=24)
     ev = EmailVerification(
@@ -54,11 +200,30 @@ def send_email_verification(username: str, email: str):
         session.commit()
 
     verify_link = f'{FRONTEND_URL}/verify-email?token={token}'
-    send_email(
+    _dispatch_email(
         email,
         'SGCC Wiki 이메일 인증',
         f'아래 링크로 이메일을 인증하세요 (24시간 내 유효):\n\n{verify_link}',
     )
+    return True
+
+
+def send_email_now(to: str, subject: str, body: str) -> dict:
+    """재시도·백그라운드 없이 provider를 한 번 호출하고 결과를 반환한다(설정 점검용).
+
+    관리자의 테스트 발송에 쓴다. 한도 검사는 호출측(reserve_email_slot)이 담당한다.
+
+    Returns:
+        dict: `{'provider': <log|smtp|resend>, 'message_id': <str | None>}`
+
+    Raises:
+        PermanentEmailError | Exception: provider 오류를 그대로 전파해 응답에 드러낸다.
+    """
+    send_id = uuid4().hex
+    message_id = _PROVIDERS[EMAIL_PROVIDER](send_id, to, subject, body)
+    logger.info('email sent (sync test): send_id=%s to=%s provider=%s message_id=%s', send_id, to, EMAIL_PROVIDER, message_id)
+    return {'provider': EMAIL_PROVIDER, 'message_id': message_id}
+
 
 def backup_database():
     """현재 SQLite DB를 db_backups/에 타임스탬프 파일로 스냅샷한다.

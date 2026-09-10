@@ -29,7 +29,7 @@ sgcc-wiki-backend/
 │   ├── database.py         # SQLite 엔진과 테이블 생성
 │   ├── deps.py             # 인증 의존성, 권한·입력 검증 헬퍼
 │   ├── login_utils.py      # 비밀번호 해시, JWT/TOTP 토큰, 입력 검증
-│   └── maintenance.py      # 메일 발송, DB 백업, 관리자 부트스트랩
+│   └── maintenance.py      # 메일 발송(provider·재시도·한도), DB 백업, 관리자 부트스트랩
 ├── routers/
 │   ├── documents.py        # 문서 CRUD, 버전·diff, 검색
 │   ├── users.py            # 가입·로그인, 2FA, 이메일, 비밀번호 재설정
@@ -109,7 +109,8 @@ docker run --rm -it \
 ### 운영 시 주의사항
 
 - `.env`는 호스트에 두고 `--env-file .env`로 주입해야 합니다
-- `FRONTEND_URL`, `JWT_SECRET_KEY`, SMTP 관련 값이 없으면 API 동작이 제한될 수 있습니다
+- `FRONTEND_URL`, `JWT_SECRET_KEY`가 없으면 API 동작이 제한되고, 메일 관련 값(`RESEND_API_KEY` 또는 `SMTP_*`)이 없으면 인증 메일이 로그로만 출력됩니다
+- 메일 발송 한도는 프로세스 메모리에서 세므로 `uvicorn --workers`로 여러 프로세스를 띄우지 마세요(단일 프로세스 전제)
 - `wiki.db`와 `logs/`, `db_backups/`는 컨테이너 내부 경로와 호스트 경로를 연결해 관리하는 것이 안전합니다
 
 ```bash
@@ -136,10 +137,15 @@ docker run --rm -it \
 | `FRONTEND_URL` | `http://localhost:5173` | CORS 허용 origin, 메일 링크 base URL |
 | `DB_PATH` | `wiki.db` | SQLite 파일 경로 |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | — | 관리자 부트스트랩. 둘 중 하나라도 비면 skip |
-| `SMTP_HOST` | — | 메일 서버. 미설정이면 링크를 로그로만 출력 |
-| `SMTP_PORT` | `587` | 메일 서버 포트(STARTTLS) |
+| `EMAIL_PROVIDER` | 자동 추론 | `resend` / `smtp` / `log`. 미설정이면 `RESEND_API_KEY`가 있을 때 resend, `SMTP_HOST`가 있을 때 smtp, 둘 다 없으면 log(발송 대신 로그 출력). 잘못된 값이거나 필요한 키가 없으면 기동 거부 |
+| `RESEND_API_KEY` | — | Resend API 키(`re_...`). provider가 resend일 때 필수 |
+| `EMAIL_FROM` | `SMTP_FROM` 값 | 보내는 사람 주소. Resend는 인증한 도메인의 주소여야 함 |
+| `EMAIL_DAILY_LIMIT` | `90` | 24시간 발송 상한(모든 메일 합산). Resend 무료 한도(하루 100통) 아래로 유지 |
+| `EMAIL_COOLDOWN_SECONDS` | `60` | 같은 주소로 다시 보내기까지 최소 간격 |
+| `SMTP_HOST` | — | SMTP 서버. provider가 smtp일 때 필수 |
+| `SMTP_PORT` | `587` | SMTP 포트. STARTTLS만 지원(465 SSL 직결 불가) |
 | `SMTP_USER` / `SMTP_PASSWORD` | — | SMTP 로그인 정보. 비면 로그인 생략 |
-| `SMTP_FROM` | `no-reply@sgcc-wiki.local` | 보내는 사람 주소 |
+| `SMTP_FROM` | `no-reply@sgcc-wiki.local` | `EMAIL_FROM` 미설정 시의 보내는 사람 주소(구버전 호환) |
 
 `ADMIN_USERNAME`/`ADMIN_PASSWORD`가 설정되면 서버 시작 시 해당 계정을 `admin`으로 승격하거나 새로 생성합니다.
 
@@ -178,11 +184,13 @@ docker run --rm -it \
 
 인증 토큰에 대상 이메일이 담겨 있어, 인증 전에 이메일을 바꾸면 이전 링크는 무효가 됩니다.
 
+같은 주소로 `EMAIL_COOLDOWN_SECONDS`(기본 60초) 안에 다시 요청하거나 24시간 발송 상한(`EMAIL_DAILY_LIMIT`)에 도달하면 `POST /register/verify-email`·`POST /email/verify-request`는 429를 반환합니다. 발송 자체는 백그라운드에서 이뤄지므로 응답이 200이어도 실제 전송 결과는 `logs/app.log`의 `email sent` / `email failed` 로그로 확인합니다(운영 노트 "메일 발송" 참고).
+
 ### 비밀번호 재설정
 
 **인증된(verified) 이메일이 등록된 계정에만** 실제 링크가 발송됩니다.
 
-1. `POST /password-reset/request` — 계정·이메일 존재 여부와 무관하게 항상 같은 200을 반환(enumeration 방지)
+1. `POST /password-reset/request` — 계정·이메일 존재 여부와 무관하게 항상 같은 200을 반환(enumeration 방지). 발송 쿨다운·상한에 걸려도 응답은 같고 발송만 건너뜁니다
 2. 메일 링크 → `POST /password-reset/confirm`
 
 재설정 토큰은 발급 시점의 비밀번호 해시로 서명되어 **한 번 쓰면 무효**이며 30분 후 만료됩니다.
@@ -210,7 +218,7 @@ IP 기준이며 초과 시 `429`입니다.
 
 | 분당 3회 | 분당 5회 |
 |---|---|
-| `POST /register`<br>`POST /password-reset/request`<br>`POST /email/verify-request` | `POST /login`<br>`POST /login/2fa`<br>`POST /password-reset/confirm`<br>`POST /email/verify` |
+| `POST /register`<br>`POST /password-reset/request`<br>`POST /email/verify-request`<br>`POST /email/test` | `POST /login`<br>`POST /login/2fa`<br>`POST /password-reset/confirm`<br>`POST /email/verify` |
 
 ## API
 
@@ -260,7 +268,8 @@ IP 기준이며 초과 시 `429`입니다.
 | `POST /2fa/enable` | 필요 | 바디: `code` |
 | `POST /2fa/disable` | 필요 | 바디: `code` |
 | `PUT /email` | 필요 | 바디: `email`. 형식 오류 400, 중복 409 |
-| `POST /email/verify-request` | 필요 | 인증 메일 재발송 |
+| `POST /email/verify-request` | 필요 | 인증 메일 재발송. 같은 주소 쿨다운·일일 상한이면 429 |
+| `POST /email/test` | admin | 메일 설정 점검용 테스트 발송. 바디: `email`. 동기 발송 후 `{message, provider, message_id}`, 실패 시 502 + provider 오류 메시지 |
 | `POST /email/verify` | - | 바디: `token` |
 | `POST /password-reset/request` | - | 바디: `username`. 항상 동일 응답 |
 | `POST /password-reset/confirm` | - | 바디: `token`, `new_password` |
@@ -305,6 +314,40 @@ IP 기준이며 초과 시 `429`입니다.
 
 - 매일 자정 `db_backups/db_backup_YYYYMMDD_HHhMMmSSs.db`로 백업
 - `shutil` 파일 복사가 아닌 SQLite Backup API를 사용해 트랜잭션 안전하게 복사
+
+### 메일 발송
+
+가입 인증·비밀번호 재설정 메일은 핸들러가 직접 보내지 않고 `send_email`이 백그라운드 스레드에 넘깁니다. 요청 응답은 즉시 돌아가고, 전송은 `EMAIL_PROVIDER`에 따라 다음 중 하나로 이뤄집니다.
+
+| provider | 전송 방식 | 필요한 설정 |
+|---|---|---|
+| `resend` | Resend HTTP API (`https://api.resend.com/emails`, 443 포트) | `RESEND_API_KEY`, `EMAIL_FROM`(인증한 도메인 주소) |
+| `smtp` | `smtplib` + STARTTLS, 10초 타임아웃 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `EMAIL_FROM` |
+| `log` | 발송하지 않고 본문(링크 포함)을 로그에 출력 | 없음(개발 기본값) |
+
+- 네트워크 오류·5xx·429는 5초, 30초 후 두 번 재시도합니다. 잘못된 API 키·미인증 도메인·수신자 거부 같은 4xx는 재시도하지 않고 바로 실패 로그를 남깁니다.
+- Resend 요청에는 발송마다 고유한 `Idempotency-Key`를 실어, 타임아웃 뒤 재시도해도 같은 메일이 두 번 나가지 않습니다.
+- 발송 한도(`EMAIL_DAILY_LIMIT`, `EMAIL_COOLDOWN_SECONDS`)는 프로세스 메모리에서 세므로 재시작하면 초기화되고, 여러 프로세스를 띄우면 프로세스마다 따로 셉니다.
+- 로그 키워드: `email queued` → `email sent` 또는 `email send failed (attempt n)` / `email failed permanently` / `email failed after n attempts`, 한도 차단은 `email suppressed`.
+
+**Resend 설정 순서**
+
+1. https://resend.com 가입(동아리 공용 계정 권장) → **Domains**에서 동아리 도메인 추가 → 안내하는 DNS 레코드(DKIM TXT, SPF, 필요 시 MX)를 도메인 DNS에 등록하고 Verified가 될 때까지 대기
+2. **API Keys**에서 키 발급(권한은 Sending access면 충분). 키는 한 번만 표시되므로 바로 `.env`에 기록
+3. `.env`에 아래를 추가하고 서버 재시작
+
+```
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+EMAIL_FROM=no-reply@동아리도메인
+```
+
+4. admin 계정으로 로그인해 테스트 메일을 보내 확인
+
+```bash
+curl -X POST http://localhost:8000/email/test   -H 'Authorization: Bearer <admin token>'   -H 'Content-Type: application/json'   -d '{"email": "본인주소@example.com"}'
+```
+
+정상이면 `{"message": "Test email sent.", "provider": "resend", "message_id": "..."}`, 설정 오류면 502와 함께 Resend가 준 오류 메시지가 돌아옵니다. 도메인 없이 Gmail을 쓸 때는 `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_USER`/`EMAIL_FROM`에 Gmail 주소, `SMTP_PASSWORD`에 앱 비밀번호를 넣습니다.
 
 ### 로깅
 

@@ -36,6 +36,20 @@ SMTP_USER = os.getenv('SMTP_USER')
 SMTP_PASSWORD = os.getenv('SMTP_PASSWORD')
 SMTP_FROM = os.getenv('SMTP_FROM', 'no-reply@sgcc-wiki.local')
 
+RESEND_API_KEY = os.getenv('RESEND_API_KEY')
+EMAIL_FROM = os.getenv('EMAIL_FROM') or SMTP_FROM
+# 명시하지 않으면 채워진 자격증명으로 추론한다: resend > smtp > log(발송 대신 로그).
+EMAIL_PROVIDER = os.getenv('EMAIL_PROVIDER') or ('resend' if RESEND_API_KEY else 'smtp' if SMTP_HOST else 'log')
+EMAIL_DAILY_LIMIT = int(os.getenv('EMAIL_DAILY_LIMIT', 90))
+EMAIL_COOLDOWN_SECONDS = int(os.getenv('EMAIL_COOLDOWN_SECONDS', 60))
+
+if EMAIL_PROVIDER not in ('log', 'smtp', 'resend'):
+    raise RuntimeError(f'EMAIL_PROVIDER must be one of log/smtp/resend, got {EMAIL_PROVIDER!r}.')
+if EMAIL_PROVIDER == 'resend' and not RESEND_API_KEY:
+    raise RuntimeError('EMAIL_PROVIDER=resend requires RESEND_API_KEY.')
+if EMAIL_PROVIDER == 'smtp' and not SMTP_HOST:
+    raise RuntimeError('EMAIL_PROVIDER=smtp requires SMTP_HOST.')
+
 os.makedirs(BACKUP_DIR, exist_ok=True)
 
 limiter = Limiter(key_func=get_remote_address)

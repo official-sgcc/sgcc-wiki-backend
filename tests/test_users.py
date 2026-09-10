@@ -5,7 +5,7 @@ def test_register_sends_verification_email_before_account_creation(client, monke
     import routers.users
 
     sent = []
-    monkeypatch.setattr(routers.users, 'send_email_verification', lambda username, email: sent.append(email))
+    monkeypatch.setattr(routers.users, 'send_email_verification', lambda username, email: sent.append(email) or True)
 
     resp = client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice@example.com'})
     assert resp.status_code == 200

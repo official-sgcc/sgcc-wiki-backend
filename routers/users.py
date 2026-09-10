@@ -1,5 +1,6 @@
 """회원가입·로그인, 2FA, 이메일 인증, 비밀번호 재설정 엔드포인트."""
 
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
@@ -16,7 +17,7 @@ from core.login_utils import (
     generate_totp_secret, totp_provisioning_uri, matched_totp_step,
     DUMMY_PASSWORD_HASH, PASSWORD_RESET_EXPIRE_MINUTES,
 )
-from core.maintenance import send_email, send_email_verification
+from core.maintenance import reserve_email_slot, send_email, send_email_now, send_email_verification
 from schemas.wiki_doc import WikiDocVersion
 from schemas.wiki_user import (
     WikiUser, UserRegisterForm, RegisterEmailRequest, UserIdAndPassword,
@@ -47,7 +48,8 @@ async def request_register_email_verification(request: Request, body: RegisterEm
     Raises:
         HTTPException 400: 중복 아이디.
         HTTPException 409: 이미 사용중인 이메일.
-        HTTPException 429: 분당 요청 한도 초과(rate limit).
+        HTTPException 429: 분당 요청 한도 초과(rate limit), 또는 같은 주소로의 재발송
+                           쿨다운·일일 발송 상한에 걸렸을 때.
     """
     validate_username(body.username)
     validate_email(body.email)
@@ -58,7 +60,8 @@ async def request_register_email_verification(request: Request, body: RegisterEm
         if session.exec(select(WikiUser).where(WikiUser.email == body.email)).first():
             raise HTTPException(status_code=409, detail='Email already in use.')
 
-    send_email_verification(body.username, body.email)
+    if not send_email_verification(body.username, body.email):
+        raise HTTPException(status_code=429, detail='Too many emails requested for this address. Please try again later.')
     logger.info('signup verification email sent: %s', body.email)
     return {'message': 'A verification link has been sent to your email address.'}
 
@@ -593,7 +596,8 @@ async def request_email_verification(request: Request, current_user: WikiUser = 
     Raises:
         HTTPException 401: 비로그인 상태.
         HTTPException 400: 등록된 이메일이 없거나 이미 인증됐을 때.
-        HTTPException 429: 분당 요청 한도 초과(rate limit).
+        HTTPException 429: 분당 요청 한도 초과(rate limit), 또는 같은 주소로의 재발송
+                           쿨다운·일일 발송 상한에 걸렸을 때.
     """
     if current_user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Login required.')
@@ -604,9 +608,54 @@ async def request_email_verification(request: Request, current_user: WikiUser = 
         if user.email_verified:
             raise HTTPException(status_code=400, detail='Email is already verified.')
 
-        send_email_verification(user.username, user.email)
+        if not send_email_verification(user.username, user.email):
+            raise HTTPException(status_code=429, detail='Too many emails requested for this address. Please try again later.')
         logger.info('email verification resent: %s', user.username)
         return {'message': 'A verification link has been sent.'}
+
+@router.post('/email/test')
+@limiter.limit('3/minute')
+async def send_test_email(request: Request, body: EmailUpdate, current_user: WikiUser = Depends(get_current_user)):
+    """메일 설정 점검용 테스트 메일을 보낸다. (admin 전용, 분당 3회)
+
+    평소 발송과 달리 백그라운드·재시도 없이 provider를 한 번만 동기 호출하고, 실패하면
+    provider가 준 오류 메시지를 그대로 502로 돌려준다. 잘못된 API 키, 미인증 도메인,
+    막힌 SMTP 포트 같은 설정 문제를 로그를 뒤지지 않고 바로 확인하기 위한 엔드포인트다.
+
+    Args:
+        request: slowapi rate limiter가 요구하는 요청 객체(직접 사용하지 않음).
+        body: `{email}` — 테스트 메일을 받을 주소.
+        current_user: 인증 사용자. admin이 아니면 403.
+
+    Returns:
+        dict: `{'message', 'provider', 'message_id'}`. log provider면 message_id는 null.
+
+    Raises:
+        HTTPException 401: 비로그인 상태.
+        HTTPException 403: admin이 아닐 때.
+        HTTPException 400: 이메일 형식이 올바르지 않을 때.
+        HTTPException 429: 분당 요청 한도 초과, 또는 같은 주소 쿨다운·일일 발송 상한.
+        HTTPException 502: provider가 발송을 거부했거나 연결에 실패했을 때.
+    """
+    if current_user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Login required.')
+    if current_user.permission != 'admin':
+        raise HTTPException(status_code=403, detail='Admin permission required.')
+    validate_email(body.email)
+    if not reserve_email_slot(body.email):
+        raise HTTPException(status_code=429, detail='Too many emails requested for this address. Please try again later.')
+    try:
+        result = await asyncio.to_thread(
+            send_email_now,
+            body.email,
+            'SGCC Wiki 메일 테스트',
+            '이 메일이 보이면 SGCC Wiki 메일 설정이 정상입니다.',
+        )
+    except Exception as exc:
+        logger.warning('test email failed: to=%s: %s', body.email, exc)
+        raise HTTPException(status_code=502, detail=f'Email delivery failed: {exc}')
+    logger.info('test email sent by %s to %s', current_user.username, body.email)
+    return {'message': 'Test email sent.', **result}
 
 @router.post('/email/verify')
 @limiter.limit('5/minute')

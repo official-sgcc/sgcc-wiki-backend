@@ -8,7 +8,7 @@ apscheduler
 diff-match-patch
 slowapi
 pyotp
+httpx
 
 # Optional / testing
 pytest
-httpx
