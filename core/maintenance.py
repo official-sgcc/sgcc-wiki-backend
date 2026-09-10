@@ -8,7 +8,7 @@ import time
 from collections import deque
 from datetime import datetime, timedelta
 from email.message import EmailMessage
-from email.utils import make_msgid
+from email.utils import make_msgid, parseaddr
 from html import escape as html_escape
 from uuid import uuid4
 import httpx
@@ -57,7 +57,8 @@ def _deliver_smtp(send_id: str, to: str, subject: str, body: str, html: str | No
     msg['From'] = EMAIL_FROM
     msg['To'] = to
     msg['Subject'] = subject
-    msg['Message-ID'] = (message_id := make_msgid(idstring=send_id))
+    # parseaddr로 표시 이름을 벗겨 순수 도메인만 쓴다. domain을 주면 socket.getfqdn() 역DNS 조회를 피한다.
+    msg['Message-ID'] = (message_id := make_msgid(idstring=send_id, domain=parseaddr(EMAIL_FROM)[1].rpartition('@')[2] or None))
     msg.set_content(body)
     if html:
         msg.add_alternative(html, subtype='html')
@@ -67,8 +68,18 @@ def _deliver_smtp(send_id: str, to: str, subject: str, body: str, html: str | No
             if SMTP_USER:
                 server.login(SMTP_USER, SMTP_PASSWORD)
             server.send_message(msg)
-    except (smtplib.SMTPAuthenticationError, smtplib.SMTPRecipientsRefused) as exc:
+    except smtplib.SMTPRecipientsRefused as exc:
+        # 모든 수신자가 5xx로 거부됐을 때만 영구 실패. 4xx(그레이리스팅)는 재시도한다.
+        if all(500 <= code < 600 for code, _ in exc.recipients.values()):
+            raise PermanentEmailError(str(exc)) from exc
+        raise
+    except smtplib.SMTPNotSupportedError as exc:
         raise PermanentEmailError(str(exc)) from exc
+    except smtplib.SMTPResponseException as exc:
+        # 인증 실패·발신자 거부·데이터 거부 등: 5xx만 영구 실패, 4xx는 재시도한다.
+        if exc.smtp_code and 500 <= exc.smtp_code < 600:
+            raise PermanentEmailError(str(exc)) from exc
+        raise
     return message_id
 
 
@@ -93,7 +104,8 @@ def _deliver_resend(send_id: str, to: str, subject: str, body: str, html: str | 
         )
     except httpx.HTTPError as exc:
         raise RuntimeError(f'resend request failed: {exc}') from exc
-    if resp.status_code == 429 or resp.status_code >= 500:
+    # 409 concurrent_idempotent_requests: 같은 키의 이전 요청이 처리 중이라는 뜻이라 재시도 대상.
+    if resp.status_code in (409, 429) or resp.status_code >= 500:
         raise RuntimeError(f'resend returned {resp.status_code}: {resp.text[:200]}')
     if resp.status_code >= 400:
         raise PermanentEmailError(f'resend rejected: {resp.status_code} {resp.text[:200]}')
@@ -129,29 +141,41 @@ def _run_in_background(func, *args):
     threading.Thread(target=func, args=args, daemon=True).start()
 
 
-def reserve_email_slot(to: str) -> bool:
+def reserve_email_slot(to: str, purpose: str = 'default') -> bool:
     """수신자 쿨다운과 24시간 발송 상한을 검사하고, 통과하면 슬롯을 소비한다.
 
     비로그인 엔드포인트가 임의 주소로 메일을 보낼 수 있으므로, 도메인 평판과
-    발송 서비스 무료 한도를 지키기 위한 최소 안전장치다.
+    발송 서비스 무료 한도를 지키기 위한 최소 안전장치다. 상한의 10%는 비밀번호
+    재설정(purpose='reset') 몫으로 남겨 둬서, 가입 인증 메일이 폭주해도 계정 복구까지
+    막히지는 않게 한다. 총량은 여전히 EMAIL_DAILY_LIMIT을 넘지 않는다.
+
+    Args:
+        to: 수신자 주소. 대소문자·앞뒤 공백은 무시하고 같은 주소로 본다.
+        purpose: 'reset'이면 예약분까지 쓸 수 있고, 그 외 용도는 예약분을 뺀 상한을 받는다.
+
+    Returns:
+        bool: 슬롯을 소비했으면 True, 쿨다운·상한에 걸리면 False.
     """
     now = datetime.utcnow()
+    key = to.strip().lower()
+    reserve = EMAIL_DAILY_LIMIT // 10
+    limit = EMAIL_DAILY_LIMIT if purpose == 'reset' else EMAIL_DAILY_LIMIT - reserve
     with _send_lock:
         while _recent_sends and _recent_sends[0] < now - timedelta(days=1):
             _recent_sends.popleft()
-        last = _last_send_by_recipient.get(to)
+        last = _last_send_by_recipient.get(key)
         if last and last > now - timedelta(seconds=EMAIL_COOLDOWN_SECONDS):
             logger.warning('email suppressed (cooldown %ds): to=%s', EMAIL_COOLDOWN_SECONDS, to)
             return False
-        if len(_recent_sends) >= EMAIL_DAILY_LIMIT:
-            logger.warning('email suppressed (daily limit %d reached): to=%s', EMAIL_DAILY_LIMIT, to)
+        if len(_recent_sends) >= limit:
+            logger.warning('email suppressed (daily limit %d reached for %s): to=%s', limit, purpose, to)
             return False
         if len(_last_send_by_recipient) > 1000:
             cutoff = now - timedelta(seconds=EMAIL_COOLDOWN_SECONDS)
             for key in [k for k, v in _last_send_by_recipient.items() if v < cutoff]:
                 del _last_send_by_recipient[key]
         _recent_sends.append(now)
-        _last_send_by_recipient[to] = now
+        _last_send_by_recipient[key] = now
         return True
 
 
@@ -162,7 +186,7 @@ def _dispatch_email(to: str, subject: str, body: str, html: str | None = None):
     _run_in_background(_deliver_with_retry, send_id, to, subject, body, html)
 
 
-def send_email(to: str, subject: str, body: str, html: str | None = None) -> bool:
+def send_email(to: str, subject: str, body: str, html: str | None = None, purpose: str = 'default') -> bool:
     """이메일 발송을 예약한다. 한도(수신자 쿨다운·일일 상한)에 걸리면 False.
 
     실제 전송은 EMAIL_PROVIDER(log/smtp/resend)로 백그라운드 스레드에서 수행하므로
@@ -173,11 +197,12 @@ def send_email(to: str, subject: str, body: str, html: str | None = None) -> boo
         subject: 제목.
         body: 본문(plain text). HTML을 못 보는 클라이언트용 대체 텍스트이기도 하다.
         html: 있으면 HTML 본문으로 함께 보낸다(render_email_html 참고).
+        purpose: 발송 용도. reserve_email_slot의 상한 계산에 쓰인다.
 
     Returns:
         bool: 발송이 예약됐으면 True, 한도에 걸려 건너뛰었으면 False.
     """
-    if not reserve_email_slot(to):
+    if not reserve_email_slot(to, purpose):
         return False
     _dispatch_email(to, subject, body, html)
     return True
@@ -243,7 +268,7 @@ def send_email_verification(username: str, email: str) -> bool:
     Returns:
         bool: 발송이 예약됐으면 True. 한도에 걸리면 레코드를 만들지 않고 False.
     """
-    if not reserve_email_slot(email):
+    if not reserve_email_slot(email, 'verify'):
         return False
     token = create_email_verification_token(username, email)
     expires = datetime.utcnow() + timedelta(minutes=EMAIL_VERIFY_EXPIRE_MINUTES)
@@ -298,6 +323,7 @@ def send_password_reset_email(to: str, reset_link: str) -> bool:
             reset_link,
             f'재설정 링크는 {valid_for} 동안 유효하고 한 번만 쓸 수 있습니다.',
         ),
+        purpose='reset',
     )
 
 

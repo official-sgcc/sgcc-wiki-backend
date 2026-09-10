@@ -51,7 +51,7 @@ python3 -m py_compile main.py core/*.py routers/*.py schemas/*.py
 
 - `load_dotenv()`는 **`os.getenv` 호출보다 반드시 먼저**. `core/config.py`/`core/login_utils.py` 상단의 호출 패턴을 깨지 말 것 (과거에 순서가 뒤바뀌어 `FRONTEND_URL`이 적용 안 됐던 적 있음). 환경변수는 각 모듈에서 `os.getenv`로 다시 읽지 말고 `core/config.py`에서 가져다 쓴다
 - `engine = create_engine(...)`과 `SQLModel.metadata.create_all(engine)`은 `core/database.py` 임포트 시점에 실행된다. 그래서 테스트는 `DB_PATH`를 바꾼 뒤 `sys.modules`에서 앱 모듈(`main`/`core.*`/`routers.*`)을 지우고 다시 임포트한다(`tests/conftest.py`의 `reload_app`). **`schemas`는 지우면 안 된다** — 테이블 클래스가 같은 metadata에 재등록되며 에러가 난다
-- 라우터는 `from core.maintenance import send_email`처럼 이름을 자기 네임스페이스로 가져온다. 테스트에서 monkeypatch할 때는 원본 모듈이 아니라 **사용하는 쪽**(`routers.users.send_password_reset_email`)을 패치할 것. `send_email`/`send_email_verification`/`send_password_reset_email`은 bool을 반환하므로 스텁도 `True`를 돌려줘야 핸들러가 429를 내지 않는다
+- 라우터는 `from core.maintenance import send_password_reset_email`처럼 이름을 자기 네임스페이스로 가져온다. 테스트에서 monkeypatch할 때는 원본 모듈이 아니라 **사용하는 쪽**(`routers.users.send_password_reset_email`)을 패치할 것. `send_email`/`send_email_verification`/`send_password_reset_email`은 bool을 반환하므로 스텁도 `True`를 돌려줘야 핸들러가 429를 내지 않는다
 - `JWT_SECRET_KEY`가 없으면 `login_utils` 임포트 단계에서 `RuntimeError`로 기동을 거부한다(fail-fast). 기본 서명 키로 돌아가는 fallback을 넣지 말 것
 
 ### 인증 헤더 (이중 지원)
@@ -72,9 +72,9 @@ python3 -m py_compile main.py core/*.py routers/*.py schemas/*.py
 
 핸들러는 provider를 직접 호출하지 않고 `core/maintenance.py`의 `send_email_verification` / `send_password_reset_email`(공용 `send_email`)만 쓴다. 메일 본문은 텍스트 + HTML 두 벌이며 HTML은 `render_email_html` 공용 템플릿으로만 만든다(사용자 입력은 반드시 escape). 이 함수들은 **한도 검사 → 백그라운드 스레드 발송**을 하고 즉시 bool을 돌려준다.
 
-- provider는 `EMAIL_PROVIDER`(`log`/`smtp`/`resend`) 하나로 고르고 `_PROVIDERS` 딕셔너리에 매핑돼 있다. 새 provider는 `_deliver_xxx(send_id, to, subject, body) -> message_id` 시그니처로 추가하고 config의 검증 목록에도 넣을 것
-- 재시도 정책: 네트워크 오류·5xx·429만 `EMAIL_RETRY_DELAYS`만큼 재시도, 4xx·인증 실패·수신자 거부는 `PermanentEmailError`로 즉시 포기. 재시도에도 같은 `send_id`(Resend `Idempotency-Key`)를 쓴다
-- 한도(`reserve_email_slot`: 수신자 쿨다운 + 24시간 상한)는 인메모리다. 메일을 보내는 엔드포인트를 새로 만들면 반드시 이 한도를 소비할 것. 한도에 걸리면 사용자용 엔드포인트는 429를 내되, **`POST /password-reset/request`는 여전히 같은 200**을 유지한다(enumeration 방지)
+- provider는 `EMAIL_PROVIDER`(`log`/`smtp`/`resend`) 하나로 고르고 `_PROVIDERS` 딕셔너리에 매핑돼 있다. 새 provider는 `_deliver_xxx(send_id, to, subject, body, html) -> message_id` 시그니처로 추가하고 config의 검증 목록에도 넣을 것
+- 재시도 정책: `PermanentEmailError`가 아닌 예외는 모두 `EMAIL_RETRY_DELAYS`만큼 재시도한다(네트워크 오류·타임아웃·5xx·429, Resend는 409 포함). 영구 오류(잘못된 키·미인증 도메인·SMTP 5xx·인증 실패)만 `PermanentEmailError`로 즉시 포기. 재시도에도 같은 `send_id`(Resend `Idempotency-Key`)를 쓴다
+- 한도(`reserve_email_slot`: 수신자 쿨다운 + 24시간 상한)는 인메모리다. 메일을 보내는 엔드포인트를 새로 만들면 반드시 이 한도를 소비할 것. `purpose='reset'`만 상한의 10% 예약분까지 쓸 수 있고 나머지 용도는 예약분을 뺀 상한을 받는다. 새 용도에 `'reset'`을 쓰지 말 것. 한도에 걸리면 사용자용 엔드포인트는 429를 내되, **`POST /password-reset/request`는 여전히 같은 200**을 유지한다(enumeration 방지)
 - 발송 실패는 사용자 응답에 영향을 주지 않고 로그(`email failed ...`)에만 남는다. 동기 발송이 필요한 곳은 admin 전용 `POST /email/test`(`send_email_now`)뿐이다
 - 테스트는 conftest에서 `EMAIL_PROVIDER=log`로 고정한다. 발송 경로를 검증할 때는 `core.maintenance._run_in_background`를 동기 실행으로, `core.maintenance.httpx.post` / `smtplib.SMTP`를 가짜로 바꾼다(`tests/test_email_sending.py` 참고). 실제 네트워크를 타는 테스트를 넣지 말 것
 
@@ -122,7 +122,7 @@ select(1).select_from(tag_entries).where(func.json_extract(tag_entries.c.value, 
 
 | 분당 3회 | 분당 5회 |
 |---|---|
-| `/register`, `/password-reset/request`, `/email/verify-request`, `/email/test` | `/login`, `/login/2fa`, `/password-reset/confirm`, `/email/verify` |
+| `/register`, `/password-reset/request`, `/email/verify-request`, `/email/test`, `PUT /email` | `/login`, `/login/2fa`, `/password-reset/confirm`, `/email/verify` |
 
 새 인증·메일 발송·민감 엔드포인트를 추가하면 같은 데코레이터를 붙일 것.
 

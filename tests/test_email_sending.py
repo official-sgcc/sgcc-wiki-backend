@@ -155,7 +155,7 @@ def test_email_test_endpoint_is_admin_only(client, auth_headers, admin_headers):
     headers, _ = auth_headers('alice123')
     admin, _ = admin_headers
 
-    assert client.post('/email/test', json={'email': 'x@example.com'}).status_code == 401
+    assert client.post('/email/test', json={'email': 'x@example.com'}).status_code == 403
     assert client.post('/email/test', json={'email': 'x@example.com'}, headers=headers).status_code == 403
 
     # log provider: 실제 발송 없이 성공, message_id는 null
@@ -226,3 +226,28 @@ def test_smtp_provider_uses_timeout_starttls_and_login(client, monkeypatch):
     assert events[3][3] == message_id
     # 텍스트 + HTML 두 파트로 보낸다(HTML을 못 보는 클라이언트는 텍스트를 쓴다).
     assert events[3][4] == 'multipart/alternative'
+
+
+def test_cooldown_normalizes_recipient_case(client):
+    # 회귀 방지: 같은 메일함의 대소문자 변형이 각각 별도 쿨다운 키가 되어
+    # 우회되면 안 된다(reserve_email_slot이 소문자로 정규화).
+    first = client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice@example.com'})
+    assert first.status_code == 200
+
+    variant = client.post('/register/verify-email', json={'username': 'alice456', 'email': 'ALICE@example.com'})
+    assert variant.status_code == 429
+
+
+def test_daily_limit_reserves_headroom_for_password_reset(client, monkeypatch):
+    # 회귀 방지: 가입 인증 메일이 상한을 다 써도 비밀번호 재설정 몫(10%)은 남아야 한다.
+    # 총량은 EMAIL_DAILY_LIMIT을 넘지 않는다.
+    import core.maintenance as maintenance
+    monkeypatch.setattr(maintenance, 'EMAIL_DAILY_LIMIT', 10)   # 예약분 1 → 일반 용도 상한 9
+    monkeypatch.setattr(maintenance, 'EMAIL_COOLDOWN_SECONDS', 0)
+
+    for i in range(9):
+        assert maintenance.reserve_email_slot(f'u{i}@example.com', 'verify') is True
+    assert maintenance.reserve_email_slot('u9@example.com', 'verify') is False
+
+    assert maintenance.reserve_email_slot('victim@example.com', 'reset') is True
+    assert maintenance.reserve_email_slot('victim2@example.com', 'reset') is False

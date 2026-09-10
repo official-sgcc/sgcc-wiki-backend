@@ -37,11 +37,13 @@ SMTP_PASSWORD = os.getenv('SMTP_PASSWORD')
 SMTP_FROM = os.getenv('SMTP_FROM', 'no-reply@sgcc-wiki.local')
 
 RESEND_API_KEY = os.getenv('RESEND_API_KEY')
+DEFAULT_EMAIL_FROM = 'no-reply@sgcc-wiki.local'
 EMAIL_FROM = os.getenv('EMAIL_FROM') or SMTP_FROM
 # 명시하지 않으면 채워진 자격증명으로 추론한다: resend > smtp > log(발송 대신 로그).
 EMAIL_PROVIDER = os.getenv('EMAIL_PROVIDER') or ('resend' if RESEND_API_KEY else 'smtp' if SMTP_HOST else 'log')
-EMAIL_DAILY_LIMIT = int(os.getenv('EMAIL_DAILY_LIMIT', 90))
-EMAIL_COOLDOWN_SECONDS = int(os.getenv('EMAIL_COOLDOWN_SECONDS', 60))
+# 빈 문자열(플레이스홀더 .env 줄)은 미설정으로 취급해 기본값으로 되돌린다.
+EMAIL_DAILY_LIMIT = int((os.getenv('EMAIL_DAILY_LIMIT') or '').strip() or 90)
+EMAIL_COOLDOWN_SECONDS = int((os.getenv('EMAIL_COOLDOWN_SECONDS') or '').strip() or 60)
 
 if EMAIL_PROVIDER not in ('log', 'smtp', 'resend'):
     raise RuntimeError(f'EMAIL_PROVIDER must be one of log/smtp/resend, got {EMAIL_PROVIDER!r}.')
@@ -49,6 +51,10 @@ if EMAIL_PROVIDER == 'resend' and not RESEND_API_KEY:
     raise RuntimeError('EMAIL_PROVIDER=resend requires RESEND_API_KEY.')
 if EMAIL_PROVIDER == 'smtp' and not SMTP_HOST:
     raise RuntimeError('EMAIL_PROVIDER=smtp requires SMTP_HOST.')
+# log 이외의 provider는 실제로 배달 가능한 발신 주소가 필요하다. 플레이스홀더로 두면
+# Resend는 미인증 도메인으로 거부하고 SMTP도 배달 불가라 사용자는 200을 받지만 메일은 안 온다.
+if EMAIL_PROVIDER != 'log' and EMAIL_FROM == DEFAULT_EMAIL_FROM:
+    raise RuntimeError('EMAIL_FROM must be a real sender address when EMAIL_PROVIDER is not log.')
 
 os.makedirs(BACKUP_DIR, exist_ok=True)
 

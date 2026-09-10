@@ -27,6 +27,9 @@ def client(monkeypatch):
     monkeypatch.setenv('ADMIN_PASSWORD', '')
     monkeypatch.setenv('JWT_SECRET_KEY', 'test-jwt-secret-key-32-bytes-long')
     monkeypatch.setenv('EMAIL_PROVIDER', 'log')
+    monkeypatch.setenv('EMAIL_COOLDOWN_SECONDS', '60')
+    monkeypatch.setenv('EMAIL_DAILY_LIMIT', '90')
+    monkeypatch.setenv('EMAIL_FROM', 'SGCC Wiki <no-reply@example.com>')
 
     main = reload_app()
 

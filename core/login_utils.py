@@ -33,7 +33,8 @@ def validate_username(username: str):
         )
 
 def validate_email(email: str):
-    if not EMAIL_PATTERN.match(email):
+    # 쉼표는 SMTP 헤더에서 여러 수신자로 펼쳐질 수 있어 명시적으로 거부한다.
+    if not EMAIL_PATTERN.match(email) or ',' in email:
         raise HTTPException(status_code=400, detail='Invalid email address.')
 
 def validate_password(password: str):

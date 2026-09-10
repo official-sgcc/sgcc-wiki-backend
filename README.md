@@ -140,7 +140,7 @@ docker run --rm -it \
 | `EMAIL_PROVIDER` | 자동 추론 | `resend` / `smtp` / `log`. 미설정이면 `RESEND_API_KEY`가 있을 때 resend, `SMTP_HOST`가 있을 때 smtp, 둘 다 없으면 log(발송 대신 로그 출력). 잘못된 값이거나 필요한 키가 없으면 기동 거부 |
 | `RESEND_API_KEY` | — | Resend API 키(`re_...`). provider가 resend일 때 필수 |
 | `EMAIL_FROM` | `SMTP_FROM` 값 | 보내는 사람 주소. Resend는 인증한 도메인의 주소여야 함 |
-| `EMAIL_DAILY_LIMIT` | `90` | 24시간 발송 상한(모든 메일 합산). Resend 무료 한도(하루 100통) 아래로 유지 |
+| `EMAIL_DAILY_LIMIT` | `90` | 24시간 발송 상한(모든 메일 합산). 이 중 10%는 비밀번호 재설정 몫으로 예약. Resend 무료 한도(하루 100통) 아래로 유지 |
 | `EMAIL_COOLDOWN_SECONDS` | `60` | 같은 주소로 다시 보내기까지 최소 간격 |
 | `SMTP_HOST` | — | SMTP 서버. provider가 smtp일 때 필수 |
 | `SMTP_PORT` | `587` | SMTP 포트. STARTTLS만 지원(465 SSL 직결 불가) |
@@ -218,7 +218,7 @@ IP 기준이며 초과 시 `429`입니다.
 
 | 분당 3회 | 분당 5회 |
 |---|---|
-| `POST /register`<br>`POST /password-reset/request`<br>`POST /email/verify-request`<br>`POST /email/test` | `POST /login`<br>`POST /login/2fa`<br>`POST /password-reset/confirm`<br>`POST /email/verify` |
+| `POST /register`<br>`POST /password-reset/request`<br>`POST /email/verify-request`<br>`POST /email/test`<br>`PUT /email` | `POST /login`<br>`POST /login/2fa`<br>`POST /password-reset/confirm`<br>`POST /email/verify` |
 
 ## API
 
@@ -267,7 +267,7 @@ IP 기준이며 초과 시 `429`입니다.
 | `POST /2fa/setup` | 필요 | `{secret, otpauth_uri}` |
 | `POST /2fa/enable` | 필요 | 바디: `code` |
 | `POST /2fa/disable` | 필요 | 바디: `code` |
-| `PUT /email` | 필요 | 바디: `email`. 형식 오류 400, 중복 409 |
+| `PUT /email` | 필요 | 바디: `email`. 형식 오류 400, 중복 409, 분당 3회 초과 429 |
 | `POST /email/verify-request` | 필요 | 인증 메일 재발송. 같은 주소 쿨다운·일일 상한이면 429 |
 | `POST /email/test` | admin | 메일 설정 점검용 테스트 발송. 바디: `email`. 동기 발송 후 `{message, provider, message_id}`, 실패 시 502 + provider 오류 메시지 |
 | `POST /email/verify` | - | 바디: `token` |
@@ -328,7 +328,7 @@ IP 기준이며 초과 시 `429`입니다.
 - 메일은 텍스트와 HTML 두 벌로 나갑니다. HTML은 버튼 하나짜리 공용 템플릿(`render_email_html`)이며, HTML을 표시하지 않는 클라이언트에는 텍스트 본문이 보입니다.
 - 네트워크 오류·5xx·429는 5초, 30초 후 두 번 재시도합니다. 잘못된 API 키·미인증 도메인·수신자 거부 같은 4xx는 재시도하지 않고 바로 실패 로그를 남깁니다.
 - Resend 요청에는 발송마다 고유한 `Idempotency-Key`를 실어, 타임아웃 뒤 재시도해도 같은 메일이 두 번 나가지 않습니다.
-- 발송 한도(`EMAIL_DAILY_LIMIT`, `EMAIL_COOLDOWN_SECONDS`)는 프로세스 메모리에서 세므로 재시작하면 초기화되고, 여러 프로세스를 띄우면 프로세스마다 따로 셉니다.
+- 발송 한도(`EMAIL_DAILY_LIMIT`, `EMAIL_COOLDOWN_SECONDS`)는 프로세스 메모리에서 세므로 재시작하면 초기화되고, 여러 프로세스를 띄우면 프로세스마다 따로 셉니다. 상한의 10%는 비밀번호 재설정 몫으로 남겨 두어, 가입 인증 메일이 폭주해도 계정 복구는 계속 됩니다.
 - 로그 키워드: `email queued` → `email sent` 또는 `email send failed (attempt n)` / `email failed permanently` / `email failed after n attempts`, 한도 차단은 `email suppressed`.
 
 **Resend 설정 순서**

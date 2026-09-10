@@ -27,6 +27,9 @@ from schemas.wiki_user import (
 )
 from schemas.wiki_user import EmailVerification
 
+# 발송 한도(쿨다운·일일 상한)에 걸린 사용자용 엔드포인트가 공통으로 쓰는 429 detail.
+EMAIL_THROTTLED_DETAIL = 'Too many emails requested for this address. Please try again later.'
+
 router = APIRouter()
 
 @router.post('/register/verify-email')
@@ -61,7 +64,7 @@ async def request_register_email_verification(request: Request, body: RegisterEm
             raise HTTPException(status_code=409, detail='Email already in use.')
 
     if not send_email_verification(body.username, body.email):
-        raise HTTPException(status_code=429, detail='Too many emails requested for this address. Please try again later.')
+        raise HTTPException(status_code=429, detail=EMAIL_THROTTLED_DETAIL)
     logger.info('signup verification email sent: %s', body.email)
     return {'message': 'A verification link has been sent to your email address.'}
 
@@ -537,13 +540,16 @@ async def disable_2fa(body: TotpCode, current_user: WikiUser = Depends(get_curre
         return {'message': 'Two-factor authentication has been disabled.'}
 
 @router.put('/email')
-async def set_email(body: EmailUpdate, current_user: WikiUser = Depends(get_current_user)):
-    """본인 계정의 이메일을 변경한다. (로그인 필요)
+@limiter.limit('3/minute')
+async def set_email(request: Request, body: EmailUpdate, current_user: WikiUser = Depends(get_current_user)):
+    """본인 계정의 이메일을 변경한다. (로그인 필요, 분당 3회)
 
     새 이메일은 항상 미인증 상태(email_verified=False)로 저장되고, 곧바로 인증 링크를
-    발송한다. 이메일은 계정 간 유일해야 한다.
+    발송한다. 이메일은 계정 간 유일해야 한다. 메일을 보내는 엔드포인트라 다른 발송
+    엔드포인트와 같은 IP당 분당 3회 제한을 둔다.
 
     Args:
+        request: slowapi rate limiter가 요구하는 요청 객체(직접 사용하지 않음).
         body: `{email}`.
         current_user: 인증 사용자. None이면 401.
 
@@ -554,6 +560,7 @@ async def set_email(body: EmailUpdate, current_user: WikiUser = Depends(get_curr
         HTTPException 401: 비로그인 상태.
         HTTPException 400: 이메일 형식이 올바르지 않을 때.
         HTTPException 409: 다른 사용자가 이미 사용 중인 이메일일 때.
+        HTTPException 429: 분당 요청 한도 초과(rate limit).
     """
     if current_user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Login required.')
@@ -605,7 +612,7 @@ async def request_email_verification(request: Request, current_user: WikiUser = 
             raise HTTPException(status_code=400, detail='Email is already verified.')
 
         if not send_email_verification(user.username, user.email):
-            raise HTTPException(status_code=429, detail='Too many emails requested for this address. Please try again later.')
+            raise HTTPException(status_code=429, detail=EMAIL_THROTTLED_DETAIL)
         logger.info('email verification resent: %s', user.username)
         return {'message': 'A verification link has been sent.'}
 
@@ -627,19 +634,16 @@ async def send_test_email(request: Request, body: EmailUpdate, current_user: Wik
         dict: `{'message', 'provider', 'message_id'}`. log provider면 message_id는 null.
 
     Raises:
-        HTTPException 401: 비로그인 상태.
-        HTTPException 403: admin이 아닐 때.
+        HTTPException 403: 비로그인이거나 admin이 아닐 때(다른 admin API와 동일).
         HTTPException 400: 이메일 형식이 올바르지 않을 때.
         HTTPException 429: 분당 요청 한도 초과, 또는 같은 주소 쿨다운·일일 발송 상한.
         HTTPException 502: provider가 발송을 거부했거나 연결에 실패했을 때.
     """
-    if current_user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Login required.')
-    if current_user.permission != 'admin':
-        raise HTTPException(status_code=403, detail='Admin permission required.')
+    if current_user is None or current_user.permission != 'admin':
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Admin permission required.')
     validate_email(body.email)
-    if not reserve_email_slot(body.email):
-        raise HTTPException(status_code=429, detail='Too many emails requested for this address. Please try again later.')
+    if not reserve_email_slot(body.email, 'test'):
+        raise HTTPException(status_code=429, detail=EMAIL_THROTTLED_DETAIL)
     try:
         result = await asyncio.to_thread(send_test_email_now, body.email)
     except Exception as exc:
