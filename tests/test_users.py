@@ -175,6 +175,42 @@ def test_update_bio_for_self_and_read_it(client, auth_headers):
     assert public['bio'] == 'Hello world'
 
 
+def test_update_public_profile_for_self(client, auth_headers):
+    headers, username = auth_headers('alice123')
+
+    resp = client.put(
+        f'/users/{username}/profile',
+        json={
+            'nickname': 'Alice',
+            'bio': 'Backend developer',
+            'github_url': 'https://github.com/alice',
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {
+        'nickname': 'Alice',
+        'bio': 'Backend developer',
+        'github_url': 'https://github.com/alice',
+    }
+
+    public = client.get(f'/users/{username}').json()
+    assert public['nickname'] == 'Alice'
+    assert public['bio'] == 'Backend developer'
+    assert public['github_url'] == 'https://github.com/alice'
+
+
+def test_update_profile_rejects_non_github_url(client, auth_headers):
+    headers, username = auth_headers('alice123')
+
+    resp = client.put(
+        f'/users/{username}/profile',
+        json={'nickname': 'Alice', 'bio': '', 'github_url': 'https://example.com/alice'},
+        headers=headers,
+    )
+    assert resp.status_code == 400
+
+
 def test_admin_can_list_permissions_and_update_user_permission(client, auth_headers, admin_headers):
     admin, _ = admin_headers
     user_headers, username = auth_headers('alice123')

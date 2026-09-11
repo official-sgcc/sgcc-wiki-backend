@@ -38,6 +38,11 @@ class EmailUpdate(BaseModel):
 class BioUpdate(BaseModel):
     bio: str
 
+class ProfileUpdate(BaseModel):
+    nickname: str = Field(max_length=50)
+    bio: str = Field(max_length=200)
+    github_url: str = Field(max_length=200)
+
 class PermissionUpdate(BaseModel):
     permission: str
 
@@ -51,7 +56,9 @@ class WikiUser(SQLModel, table=True):
     username: str = Field(primary_key=True)
     password: str
     permission: str
-    bio: str
+    nickname: str = Field(default='')
+    bio: str = Field(default='')
+    github_url: str = Field(default='')
     email: str | None = Field(default=None, unique=True, index=True)
     email_verified: bool = Field(default=False)
     totp_secret: str | None = Field(default=None)

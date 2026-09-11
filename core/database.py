@@ -18,18 +18,31 @@ engine = create_engine(f'sqlite:///{DB_PATH}')
 SQLModel.metadata.create_all(engine)
 
 
-def migrate_legacy_document_schema() -> None:
-    """기존 SQLite 문서 테이블에 신규 컬럼을 데이터 손실 없이 보완한다."""
+def migrate_legacy_schema() -> None:
+    """기존 SQLite 테이블에 신규 컬럼을 데이터 손실 없이 보완한다."""
     with engine.begin() as connection:
-        columns = {
+        document_columns = {
             row[1]
             for row in connection.exec_driver_sql('PRAGMA table_info(wikidoc)')
         }
-        if 'view_count' not in columns:
+        if 'view_count' not in document_columns:
             connection.exec_driver_sql(
                 'ALTER TABLE wikidoc '
                 'ADD COLUMN view_count INTEGER NOT NULL DEFAULT 0'
             )
 
+        user_columns = {
+            row[1]
+            for row in connection.exec_driver_sql('PRAGMA table_info(wikiuser)')
+        }
+        if 'nickname' not in user_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE wikiuser ADD COLUMN nickname VARCHAR NOT NULL DEFAULT ''"
+            )
+        if 'github_url' not in user_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE wikiuser ADD COLUMN github_url VARCHAR NOT NULL DEFAULT ''"
+            )
 
-migrate_legacy_document_schema()
+
+migrate_legacy_schema()
