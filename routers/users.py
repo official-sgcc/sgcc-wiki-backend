@@ -1,6 +1,7 @@
 """회원가입·로그인, 2FA, 이메일 인증, 비밀번호 재설정 엔드포인트."""
 
 import asyncio
+from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
@@ -22,7 +23,7 @@ from schemas.wiki_doc import WikiDocVersion
 from schemas.wiki_user import (
     WikiUser, UserRegisterForm, RegisterEmailRequest, UserIdAndPassword,
     PasswordResetRequest, PasswordResetConfirm, TotpCode, TotpLogin,
-    EmailUpdate, BioUpdate, EmailVerify, PermissionUpdate,
+    EmailUpdate, BioUpdate, ProfileUpdate, EmailVerify, PermissionUpdate,
     ALLOWED_USER_PERMISSIONS,
 )
 from schemas.wiki_user import EmailVerification
@@ -296,6 +297,42 @@ async def update_user_bio(username: str, body: BioUpdate, current_user: WikiUser
         session.refresh(user)
         logger.info('user bio updated: %s', username)
         return {'bio': user.bio}
+
+
+@router.put('/users/{username}/profile')
+async def update_user_profile(username: str, body: ProfileUpdate, current_user: WikiUser = Depends(get_current_user)):
+    """본인 계정의 공개 프로필 필드를 수정한다."""
+    if current_user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Login required.')
+    if current_user.username != username:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='You can only update your own profile.')
+
+    nickname = body.nickname.strip()
+    bio = body.bio.strip()
+    github_url = body.github_url.strip()
+
+    if github_url:
+        parsed_url = urlparse(github_url)
+        if parsed_url.scheme != 'https' or parsed_url.netloc.lower() not in {'github.com', 'www.github.com'}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid GitHub URL.')
+
+    with Session(engine) as session:
+        user = session.get(WikiUser, username)
+        if not user:
+            raise HTTPException(status_code=404, detail='Cannot find user with the corresponding username.')
+
+        user.nickname = nickname
+        user.bio = bio
+        user.github_url = github_url
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        logger.info('user profile updated: %s', username)
+        return {
+            'nickname': user.nickname,
+            'bio': user.bio,
+            'github_url': user.github_url,
+        }
 
 @router.post('/login')
 @limiter.limit('5/minute')
