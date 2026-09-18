@@ -22,7 +22,7 @@ from core.database import engine
 from core.permissions import Role, is_admin
 from core.login_utils import (
     EMAIL_VERIFY_EXPIRE_MINUTES, PASSWORD_RESET_EXPIRE_MINUTES,
-    create_email_verification_token, hash_password,
+    create_email_verification_token, hash_password, verify_password,
 )
 from schemas.wiki_user import WikiUser, EmailVerification
 
@@ -392,7 +392,8 @@ def bootstrap_admin():
     ADMIN_USERNAME / ADMIN_PASSWORD 환경변수를 읽어:
       - 둘 중 하나라도 비어 있으면 아무 동작도 하지 않고 반환한다.
       - 해당 사용자가 없으면 permission='admin'으로 새로 생성한다.
-      - 이미 있으면 permission을 'admin'으로 승격한다(이미 admin이면 그대로 둠).
+      - 이미 있으면 admin 권한과 설정된 비밀번호를 보장한다.
+      - 비밀번호가 달라졌을 때만 해시를 갱신하고 기존 세션을 무효화한다.
 
     register API는 RESERVED_USERNAMES 때문에 'admin' 가입을 막으므로, 관리자 계정은
     이 부트스트랩 경로로만 만들어진다.
@@ -405,11 +406,19 @@ def bootstrap_admin():
     with Session(engine) as session:
         user = session.get(WikiUser, admin_username)
         if user:
+            changed = False
             if not is_admin(user):
                 user.permission = Role.ADMIN.value
+                changed = True
+                logger.info('admin bootstrap: promoted existing user to admin: %s', admin_username)
+            if not verify_password(admin_password, user.password):
+                user.password = hash_password(admin_password)
+                user.session_version += 1
+                changed = True
+                logger.info('admin bootstrap: updated configured password and revoked sessions: %s', admin_username)
+            if changed:
                 session.add(user)
                 session.commit()
-                logger.info('admin bootstrap: promoted existing user to admin: %s', admin_username)
         else:
             user = WikiUser(
                 username=admin_username,

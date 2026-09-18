@@ -70,6 +70,8 @@ python3 -m py_compile main.py core/*.py routers/*.py schemas/*.py
 
 ### 메일 발송
 
+초기 관리자 부트스트랩은 매 기동 시 ADMIN_USERNAME 계정의 역할과 ADMIN_PASSWORD를 보장한다. 비밀번호가 실제로 달라질 때만 해시를 갱신하고 session_version을 증가시킨다. 동일한 비밀번호 재해시나 일반 사용자 비밀번호 변경은 금지한다. 비밀번호/해시를 로그에 출력하지 않는다.
+
 핸들러는 provider를 직접 호출하지 않고 `core/maintenance.py`의 `send_email_verification` / `send_password_reset_email`(공용 `send_email`)만 쓴다. 메일 본문은 텍스트 + HTML 두 벌이며 HTML은 `render_email_html` 공용 템플릿으로만 만든다(사용자 입력은 반드시 escape). 이 함수들은 **한도 검사 → 백그라운드 스레드 발송**을 하고 즉시 bool을 돌려준다.
 
 - provider는 `EMAIL_PROVIDER`(`log`/`smtp`/`resend`) 하나로 고르고 `_PROVIDERS` 딕셔너리에 매핑돼 있다. 새 provider는 `_deliver_xxx(send_id, to, subject, body, html) -> message_id` 시그니처로 추가하고 config의 검증 목록에도 넣을 것
