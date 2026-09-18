@@ -25,7 +25,7 @@ def build_category_node(cat_name, all_cats, cat_map):
     """
     cat = cat_map[cat_name]
     children = [build_category_node(c.name, all_cats, cat_map) for c in all_cats if c.parent == cat_name]
-    return WikiCategoryNode(name=cat.name, parent=cat.parent, children=children)
+    return WikiCategoryNode(name=cat.name, parent=cat.parent, write_permission=cat.write_permission, children=children)
 
 def descendant_names(cat_name, all_cats):
     """자기 자신과 모든 하위 카테고리 이름 집합을 반환한다.

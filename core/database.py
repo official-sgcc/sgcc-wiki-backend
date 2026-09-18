@@ -21,6 +21,13 @@ SQLModel.metadata.create_all(engine)
 def migrate_legacy_schema() -> None:
     """기존 SQLite 테이블에 신규 컬럼을 데이터 손실 없이 보완한다."""
     with engine.begin() as connection:
+        category_columns = {
+            row[1] for row in connection.exec_driver_sql('PRAGMA table_info(wikicategory)')
+        }
+        if 'write_permission' not in category_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE wikicategory ADD COLUMN write_permission VARCHAR NOT NULL DEFAULT 'club_member'"
+            )
         document_columns = {
             row[1]
             for row in connection.exec_driver_sql('PRAGMA table_info(wikidoc)')

@@ -51,6 +51,18 @@ async def get_current_user(
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='User not found')
         return user
 
+def check_category_write_permission(session: Session, current_user: WikiUser, category):
+    name = category.get('name') if isinstance(category, dict) else getattr(category, 'name', None)
+    stored_category = session.get(WikiCategory, name) if name else None
+    if stored_category is None:
+        raise HTTPException(status_code=400, detail='Category does not exist.')
+    levels = {'login_user': 0, 'club_member': 1, 'admin': 2}
+    user_level = levels.get(current_user.permission, -1) if current_user else -1
+    required_level = levels.get(stored_category.write_permission, 3)
+    if user_level < required_level:
+        raise HTTPException(status_code=403, detail='Category write permission required.')
+
+
 def check_document_permission(session: Session, current_user: WikiUser, title: str, action: str):
     """문서별 권한(Permissions 테이블)으로 특정 동작 수행 가능 여부를 검사한다.
 

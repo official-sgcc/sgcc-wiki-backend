@@ -111,6 +111,7 @@ select(1).select_from(tag_entries).where(func.json_extract(tag_entries.c.value, 
 ### 권한 모델
 
 - 사용자 권한: `admin` / `club_member` / `login_user` (비로그인은 `current_user=None`)
+- 문서 생성·수정은 카테고리의 `write_permission` 최소 등급(기본 club_member)도 검사한다. 노드별 독립 설정이며 부모 권한을 상속하지 않는다. 기존 SQLite 카테고리는 core/database.py가 서버 시작 시 컬럼을 자동 보완한다. 문서별 권한을 통과해도 카테고리 작성 권한이 없으면 거부한다.
 - 문서별 권한은 `Permissions` 테이블에 action별 JSON 리스트(`update`/`move`/`delete`). 문서 생성 시 기본값은 update = 전체 로그인 등급, move·delete = admin.
 - `check_document_permission`은 `None`을 안전하게 거부하지만, 로그인 자체가 필수인 엔드포인트는 **`current_user is None` 체크를 직접 넣는 패턴**을 따를 것 (`POST /documents`, `POST /tags`, `POST /categories` 참고)
 - **문서 작성자**(`WikiDoc.created_by`)는 자기 문서를 권한 체크 없이 삭제 가능. 삭제에만 적용되며 update/move에는 적용하지 않는다

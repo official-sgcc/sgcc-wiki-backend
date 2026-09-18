@@ -8,7 +8,7 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 from core.config import logger
 from core.database import engine
-from core.deps import check_document_permission, get_current_user, validate_tags_and_category
+from core.deps import check_category_write_permission, check_document_permission, get_current_user, validate_tags_and_category
 from schemas.permissions import Permissions
 from schemas.wiki_doc import WikiDocMove, WikiDoc, WikiDocCreate, WikiDocUpdate, WikiDocVersion
 from schemas.wiki_user import WikiUser
@@ -98,6 +98,8 @@ async def create_document(doc_in: WikiDocCreate, current_user: WikiUser = Depend
             raise HTTPException(status_code=400, detail='There is already a document with the same name.')
         if not doc_in.title:
             raise HTTPException(status_code=400, detail='Document title cannot be empty.')
+
+        check_category_write_permission(session, current_user, doc_in.category)
 
         validate_tags_and_category(session, doc_in.tags, doc_in.category, current_user=current_user, create_missing_tags=True)
 
@@ -231,6 +233,9 @@ async def update_document(title: str, update_data: WikiDocUpdate, current_user: 
             raise HTTPException(status_code=404, detail='Cannot find document to update')
 
         check_document_permission(session, current_user, title, 'update')
+        check_category_write_permission(session, current_user, doc.category)
+        if update_data.category is not None:
+            check_category_write_permission(session, current_user, update_data.category)
 
         # 카테고리를 실제로 바꾸는 것은 이동이므로 admin 기본인 'move' 권한을 요구한다.
         # 같은 카테고리 재지정은 이동이 아니라 그냥 통과시킨다.
