@@ -132,6 +132,8 @@ def can_perform_document(user, action, document, permissions, category, lookup=N
         return False
     if is_admin(user):
         return True
+    if action == Action.DOCUMENT_DELETE:
+        return has_minimum_role(user, Role.LOGIN_USER) and user.username == document.created_by
     if not can_perform(user, action):
         return False
     field = DOCUMENT_FIELDS[action]

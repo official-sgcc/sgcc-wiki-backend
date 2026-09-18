@@ -196,7 +196,7 @@ def test_delete_document_other_users_forbidden(client, club_headers, admin_heade
     assert resp.status_code == 200
 
 
-def test_delete_document_creator_cannot_delete(client, club_headers, admin_headers):
+def test_delete_document_creator_can_delete(client, club_headers, admin_headers):
     headers, _ = club_headers('alice123')
     _prep_tag_and_category(client, headers, admin_headers)
     client.post('/documents', json={
@@ -207,7 +207,7 @@ def test_delete_document_creator_cannot_delete(client, club_headers, admin_heade
     }, headers=headers)
 
     resp = client.delete('/documents/Doc1', headers=headers)
-    assert resp.status_code == 403
+    assert resp.status_code == 200
 
 
 def test_get_document_diff(client, club_headers, admin_headers):

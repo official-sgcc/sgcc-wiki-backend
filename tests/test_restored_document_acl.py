@@ -16,7 +16,6 @@ def test_legacy_lists_use_global_floor(client, auth_headers, club_headers, admin
     assert not any(regular_caps.values())
     club_caps = client.get('/documents/by-title/permissions', params={'title': 'Legacy'}, headers=club).json()
     assert club_caps['document_update']
-    assert not club_caps['document_move'] and not club_caps['document_delete']
-    assert client.delete('/documents/Legacy', headers=club).status_code == 403
+    assert not club_caps['document_move'] and club_caps['document_delete']
     assert client.put('/documents/Legacy/move', json={'new_title': 'Renamed'}, headers=club).status_code == 200
     assert all(client.get('/documents/by-title/permissions', params={'title': 'Renamed'}, headers=admin).json().values())

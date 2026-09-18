@@ -114,7 +114,7 @@ select(1).select_from(tag_entries).where(func.json_extract(tag_entries.c.value, 
 - 인증은 DB의 현재 역할과 session_version을 확인한다. 비밀번호 재설정은 session_version을 증가시켜 기존 액세스/MFA 토큰을 폐기한다. 가입 인증 상태 조회와 토큰 없는 가입에는 이메일 발송 요청에 결합된 registration_secret이 필요하다. 사용자 응답은 공개 필드 허용 목록을 사용하고 인증 비밀/내부 상태를 노출하지 않는다.
 - 사용자 권한: `admin`(100) / `club_member`(50) / `login_user`(10) (비로그인은 `current_user=None`). 새 역할은 `Role` Enum에 추가한다.
 - 문서 생성·수정은 자신과 모든 조상 카테고리의 최소 권한 중 가장 높은 제한을 적용한다. 기본값 club_member. 부모보다 낮은 설정 저장은 거부하며, 이동/상위 설정 변경은 기존 하위 문서에 즉시 적용한다. 관리자는 권한 제한을 우회한다.
-- 문서별 Permissions 목록을 공통 등급 검사와 함께 유지한다. update는 club_member 이상, rename도 club_member 이상이며 update 제한을 함께 검사한다. move/delete는 실제 admin만 허용한다. 작성자 삭제 예외는 없다. 관리자는 모든 권한 제한을 우회한다. 기존 DB 데이터/스키마 변경은 사용자 승인 후에만 적용한다.
+- 문서별 Permissions 목록을 공통 등급 검사와 함께 유지한다. update는 club_member 이상, rename도 club_member 이상이며 update 제한을 함께 검사한다. move는 실제 admin만 허용한다. delete는 admin 또는 자기 문서의 작성자에게 허용한다. 관리자는 모든 권한 제한을 우회한다. 기존 DB 데이터/스키마 변경은 사용자 승인 후에만 적용한다.
 - 문서·태그·카테고리 생성의 로그인·역할 검사는 `require_action(..., anonymous_status=401)`을 사용한다. 계정 본인용 인증은 기존 `current_user is None` / username 확인을 유지한다.
 - `DELETE /tags`, `PUT|DELETE /categories`는 admin 전용
 
