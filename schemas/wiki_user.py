@@ -3,16 +3,19 @@ from pydantic import BaseModel
 from .permissions import Permissions
 from typing import Optional
 from datetime import datetime
+from core.permissions import role_names
 
 class UserRegisterForm(BaseModel):
     username: str
     password: str
     email: str
     verification_token: str | None = None
+    registration_secret: str | None = None
 
 class RegisterEmailRequest(BaseModel):
     username: str
     email: str
+    registration_secret: str | None = None
 
 class UserIdAndPassword(BaseModel):
     username: str
@@ -49,13 +52,14 @@ class PermissionUpdate(BaseModel):
 class EmailVerify(BaseModel):
     token: str
 
-ALLOWED_USER_PERMISSIONS = ['admin', 'club_member', 'login_user']
+ALLOWED_USER_PERMISSIONS = role_names()
 
 
 class WikiUser(SQLModel, table=True):
     username: str = Field(primary_key=True)
     password: str
     permission: str
+    session_version: int = Field(default=0)
     nickname: str = Field(default='')
     bio: str = Field(default='')
     github_url: str = Field(default='')
@@ -65,6 +69,11 @@ class WikiUser(SQLModel, table=True):
     totp_enabled: bool = Field(default=False)
     # 마지막으로 인증에 성공한 TOTP 타임스텝. 같은 스텝의 코드 재사용을 막는다(single-use).
     totp_last_step: int | None = Field(default=None)
+
+
+class RevokedToken(SQLModel, table=True):
+    token_hash: str = Field(primary_key=True)
+    expires_at: int = Field(index=True)
 
 
 class EmailVerification(SQLModel, table=True):

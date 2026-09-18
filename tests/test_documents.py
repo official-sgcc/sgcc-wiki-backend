@@ -1,6 +1,8 @@
-def _prep_tag_and_category(client, headers):
-    client.post('/tags', json={'name': 'Python'}, headers=headers)
-    client.post('/categories', json={'name': 'General'}, headers=headers)
+from tests.seed_data import seed_tag
+
+def _prep_tag_and_category(client, headers, admin_headers):
+    seed_tag('Python')
+    client.post('/categories', json={'name': 'General'}, headers=admin_headers[0])
 
 
 import sqlite3
@@ -16,9 +18,9 @@ def test_create_document_requires_auth(client):
     assert resp.status_code == 401
 
 
-def test_create_and_get_document(client, club_headers):
+def test_create_and_get_document(client, club_headers, admin_headers):
     headers, _ = club_headers('alice123')
-    _prep_tag_and_category(client, headers)
+    _prep_tag_and_category(client, headers, admin_headers)
 
     resp = client.post('/documents', json={
         'title': 'Doc1',
@@ -35,7 +37,7 @@ def test_create_and_get_document(client, club_headers):
 
 def test_move_document_updates_title_and_versions(client, admin_headers):
     headers, _ = admin_headers
-    client.post('/categories', json={'name': 'General'}, headers=headers)
+    client.post('/categories', json={'name': 'General'}, headers=admin_headers[0])
 
     client.post('/documents', json={
         'title': 'Doc1',
@@ -57,9 +59,9 @@ def test_move_document_updates_title_and_versions(client, admin_headers):
     assert len(versions) == 1
 
 
-def test_create_document_auto_creates_missing_tag(client, club_headers):
+def test_create_document_auto_creates_missing_tag(client, club_headers, admin_headers):
     headers, _ = club_headers('alice123')
-    client.post('/categories', json={'name': 'General'}, headers=headers)
+    client.post('/categories', json={'name': 'General'}, headers=admin_headers[0])
 
     resp = client.post('/documents', json={
         'title': 'DocX',
@@ -73,9 +75,9 @@ def test_create_document_auto_creates_missing_tag(client, club_headers):
     assert any(tag['name'] == 'NonExisting' for tag in tags)
 
 
-def test_update_document_auto_creates_missing_tag(client, club_headers):
+def test_update_document_auto_creates_missing_tag(client, club_headers, admin_headers):
     headers, _ = club_headers('alice123')
-    client.post('/categories', json={'name': 'General'}, headers=headers)
+    client.post('/categories', json={'name': 'General'}, headers=admin_headers[0])
     client.post('/documents', json={
         'title': 'DocY',
         'content': 'before',
@@ -105,9 +107,9 @@ def test_create_document_rejects_missing_category(client, club_headers):
     assert resp.status_code == 400
 
 
-def test_create_document_does_not_create_comment_permission(client, club_headers):
+def test_create_document_does_not_create_comment_permission(client, club_headers, admin_headers):
     headers, _ = club_headers('alice123')
-    client.post('/categories', json={'name': 'General'}, headers=headers)
+    client.post('/categories', json={'name': 'General'}, headers=admin_headers[0])
 
     resp = client.post('/documents', json={
         'title': 'DocComment',
@@ -125,7 +127,8 @@ def test_create_document_does_not_create_comment_permission(client, club_headers
         permissions = session.get(Permissions, 'DocComment')
 
     assert permissions is not None
-    assert permissions.update == ['admin', 'club_member', 'login_user']
+    assert permissions.update == ['club_member']
+    assert permissions.rename == ['club_member']
     assert permissions.move == ['admin']
     assert permissions.delete == ['admin']
     assert not hasattr(permissions, 'comment')
@@ -134,8 +137,8 @@ def test_create_document_does_not_create_comment_permission(client, club_headers
 def test_update_document_category_move_requires_admin(client, club_headers, admin_headers):
     # 카테고리 변경(이동)은 move 권한(기본 admin) 필요. 일반 사용자는 403, admin은 성공.
     headers, _ = club_headers('alice123')
-    _prep_tag_and_category(client, headers)
-    client.post('/categories', json={'name': 'Other'}, headers=headers)
+    _prep_tag_and_category(client, headers, admin_headers)
+    client.post('/categories', json={'name': 'Other'}, headers=admin_headers[0])
     client.post('/documents', json={
         'title': 'Doc1',
         'content': 'v1',
@@ -156,9 +159,9 @@ def test_update_document_category_move_requires_admin(client, club_headers, admi
     assert resp.status_code == 200
 
 
-def test_update_document_creates_version(client, club_headers):
+def test_update_document_creates_version(client, club_headers, admin_headers):
     headers, _ = club_headers('alice123')
-    _prep_tag_and_category(client, headers)
+    _prep_tag_and_category(client, headers, admin_headers)
 
     client.post('/documents', json={
         'title': 'Doc1',
@@ -176,7 +179,7 @@ def test_update_document_creates_version(client, club_headers):
 
 def test_delete_document_other_users_forbidden(client, club_headers, admin_headers):
     alice_headers, _ = club_headers('alice123')
-    _prep_tag_and_category(client, alice_headers)
+    _prep_tag_and_category(client, alice_headers, admin_headers)
     client.post('/documents', json={
         'title': 'Doc1',
         'content': 'v1',
@@ -193,9 +196,9 @@ def test_delete_document_other_users_forbidden(client, club_headers, admin_heade
     assert resp.status_code == 200
 
 
-def test_delete_document_creator_can_delete(client, club_headers):
+def test_delete_document_creator_cannot_delete(client, club_headers, admin_headers):
     headers, _ = club_headers('alice123')
-    _prep_tag_and_category(client, headers)
+    _prep_tag_and_category(client, headers, admin_headers)
     client.post('/documents', json={
         'title': 'Doc1',
         'content': 'v1',
@@ -204,12 +207,12 @@ def test_delete_document_creator_can_delete(client, club_headers):
     }, headers=headers)
 
     resp = client.delete('/documents/Doc1', headers=headers)
-    assert resp.status_code == 200
+    assert resp.status_code == 403
 
 
-def test_get_document_diff(client, club_headers):
+def test_get_document_diff(client, club_headers, admin_headers):
     headers, _ = club_headers('alice123')
-    _prep_tag_and_category(client, headers)
+    _prep_tag_and_category(client, headers, admin_headers)
     client.post('/documents', json={
         'title': 'Doc1',
         'content': 'hello',
@@ -223,9 +226,9 @@ def test_get_document_diff(client, club_headers):
     assert isinstance(resp.json(), list)
 
 
-def test_get_document_diff_rejects_first_version(client, club_headers):
+def test_get_document_diff_rejects_first_version(client, club_headers, admin_headers):
     headers, _ = club_headers('alice123')
-    _prep_tag_and_category(client, headers)
+    _prep_tag_and_category(client, headers, admin_headers)
     client.post('/documents', json={
         'title': 'Doc1',
         'content': 'v1',
@@ -240,7 +243,7 @@ def test_get_document_diff_rejects_first_version(client, club_headers):
 def test_slash_title_query_parameter_lifecycle(client, club_headers, admin_headers):
     headers, _ = club_headers('alice123')
     admin, _ = admin_headers
-    _prep_tag_and_category(client, headers)
+    _prep_tag_and_category(client, headers, admin_headers)
     title = 'React/Router 사용법'
     renamed_title = 'React/Router 심화'
 

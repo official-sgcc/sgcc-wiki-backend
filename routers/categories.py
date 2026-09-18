@@ -6,13 +6,14 @@ from sqlmodel import Session, select
 from core.config import logger
 from core.database import engine
 from core.deps import get_current_user
+from core.permissions import Action, require_action, can_write_category, effective_category_role, role_rank, Role
 from schemas.categories import WikiCategory, WikiCategoryCreate, WikiCategoryNode, WikiCategoryUpdate
 from schemas.wiki_doc import WikiDoc
 from schemas.wiki_user import WikiUser
 
 router = APIRouter()
 
-def build_category_node(cat_name, all_cats, cat_map):
+def build_category_node(cat_name, all_cats, cat_map, current_user=None):
     """카테고리 이름으로 자식을 재귀 포함한 트리 노드를 만든다.
 
     Args:
@@ -24,8 +25,11 @@ def build_category_node(cat_name, all_cats, cat_map):
         WikiCategoryNode: children까지 채워진 노드.
     """
     cat = cat_map[cat_name]
-    children = [build_category_node(c.name, all_cats, cat_map) for c in all_cats if c.parent == cat_name]
-    return WikiCategoryNode(name=cat.name, parent=cat.parent, write_permission=cat.write_permission, children=children)
+    children = [build_category_node(c.name, all_cats, cat_map, current_user) for c in all_cats if c.parent == cat_name]
+    return WikiCategoryNode(name=cat.name, parent=cat.parent, write_permission=cat.write_permission,
+        can_write=can_write_category(current_user, cat, cat_map.get), children=children,
+        effective_write_permission=effective_category_role(cat, cat_map.get),
+        inherited_write_permission=effective_category_role(cat_map.get(cat.parent), cat_map.get))
 
 def descendant_names(cat_name, all_cats):
     """자기 자신과 모든 하위 카테고리 이름 집합을 반환한다.
@@ -44,7 +48,7 @@ def descendant_names(cat_name, all_cats):
     return names
 
 @router.get('/categories')
-async def get_categories():
+async def get_categories(current_user: WikiUser = Depends(get_current_user)):
     """전체 카테고리 목록을 조회한다. (인증 불필요)
 
     Returns:
@@ -54,11 +58,11 @@ async def get_categories():
         all_cats = session.exec(select(WikiCategory)).all()
         cat_map = {cat.name: cat for cat in all_cats}
         root_cats = [cat for cat in all_cats if cat.parent is None]
-        return [build_category_node(cat.name, all_cats, cat_map) for cat in root_cats]
+        return [build_category_node(cat.name, all_cats, cat_map, current_user) for cat in root_cats]
 
 @router.post('/categories')
 async def create_category(category_in: WikiCategoryCreate, current_user: WikiUser = Depends(get_current_user)):
-    """새 카테고리를 생성한다. (로그인 필요)
+    """새 카테고리를 생성한다. (admin 전용)
 
     Args:
         category_in: 생성할 카테고리(name).
@@ -71,8 +75,7 @@ async def create_category(category_in: WikiCategoryCreate, current_user: WikiUse
         HTTPException 401: 비로그인 상태.
         HTTPException 400: 같은 이름의 카테고리가 이미 있거나, 지정한 부모가 없을 때.
     """
-    if current_user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Login required to create a category.')
+    require_action(current_user, Action.CATEGORY_CREATE, anonymous_status=401)
     with Session(engine) as session:
         if session.get(WikiCategory, category_in.name):
             raise HTTPException(status_code=400, detail='Category name already exists.')
@@ -89,7 +92,7 @@ async def create_category(category_in: WikiCategoryCreate, current_user: WikiUse
         return {'message': f'The category named {category_in.name} has been created.'}
 
 @router.get('/categories/{name}')
-async def get_category(name: str):
+async def get_category(name: str, current_user: WikiUser = Depends(get_current_user)):
     """이름으로 카테고리 하나를 조회한다. (인증 불필요)
 
     Args:
@@ -108,7 +111,7 @@ async def get_category(name: str):
         
         all_cats = session.exec(select(WikiCategory)).all()
         cat_map = {cat.name: cat for cat in all_cats}
-        return build_category_node(name, all_cats, cat_map)
+        return build_category_node(name, all_cats, cat_map, current_user)
 
 @router.get('/categories/{name}/documents')
 async def get_documents_by_category(name: str, recursive: bool = False, limit: int | None = None, offset: int = 0):
@@ -165,8 +168,7 @@ async def update_category(name: str, update_data: WikiCategoryUpdate, current_us
         HTTPException 404: 수정할 카테고리가 없을 때.
         HTTPException 400: 부모가 자기 자신이거나 순환 참조가 발생할 때.
     """
-    if current_user is None or current_user.permission != 'admin':
-        raise HTTPException(status_code=403, detail='Admin permission required to update categories.')
+    require_action(current_user, Action.ADMIN)
     with Session(engine) as session:
         def would_create_cycle(session, category_name: str, parent_name: str | None) -> bool:
             if parent_name is None:
@@ -198,6 +200,13 @@ async def update_category(name: str, update_data: WikiCategoryUpdate, current_us
             if would_create_cycle(session, name, parent_name):
                 raise HTTPException(status_code=400, detail='Category cannot create a circular parent reference.')
 
+        parent_name = update_data_dict.get('parent', category.parent)
+        if 'write_permission' in update_data_dict and parent_name:
+            floor = effective_category_role(session.get(WikiCategory, parent_name), lambda name: session.get(WikiCategory, name))
+            requested = update_data_dict['write_permission']
+            if floor is None or (floor == Role.ADMIN and requested != Role.ADMIN) or role_rank(requested) < role_rank(floor):
+                raise HTTPException(status_code=400, detail='Write permission cannot be lower than the parent requirement.')
+
         for key, value in update_data_dict.items():
             setattr(category, key, value)
         session.commit()
@@ -224,8 +233,7 @@ async def delete_category(name: str, current_user: WikiUser = Depends(get_curren
         HTTPException 404: 삭제할 카테고리가 없을 때.
         HTTPException 409: 이 카테고리를 사용하는 문서가 남아 있을 때.
     """
-    if current_user is None or current_user.permission != 'admin':
-        raise HTTPException(status_code=403, detail='Admin permission required to delete categories.')
+    require_action(current_user, Action.ADMIN)
     with Session(engine) as session:
         if not (category := session.get(WikiCategory, name)):
             raise HTTPException(status_code=404, detail='Cannot find category to delete.')
