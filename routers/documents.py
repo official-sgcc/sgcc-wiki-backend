@@ -377,9 +377,9 @@ async def move_document(title: str, move_data: WikiDocMove, current_user: WikiUs
 
 @router.delete('/documents/{title}')
 async def delete_document(title: str, current_user: WikiUser = Depends(get_current_user)):
-    """문서를 삭제한다. (관리자 전용)
+    """문서를 삭제한다. (관리자 또는 작성자)
 
-    실제 admin 역할만 삭제할 수 있다. 작성자 예외는 없다.
+    실제 admin은 모든 문서를, 인증된 작성자는 자기 문서를 삭제할 수 있다.
     문서 삭제 시 연결된 버전·권한 레코드도 cascade로 함께 제거된다.
 
     Args:
@@ -391,7 +391,7 @@ async def delete_document(title: str, current_user: WikiUser = Depends(get_curre
 
     Raises:
         HTTPException 404: 대상 문서가 없을 때.
-        HTTPException 403: 관리자가 아닐 때.
+        HTTPException 403: 관리자 또는 해당 문서 작성자가 아닐 때.
     """
     with Session(engine) as session:
         if not (doc := session.get(WikiDoc, title)):
