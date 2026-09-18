@@ -110,11 +110,12 @@ select(1).select_from(tag_entries).where(func.json_extract(tag_entries.c.value, 
 
 ### 권한 모델
 
-- 사용자 권한: `admin` / `club_member` / `login_user` (비로그인은 `current_user=None`)
-- 문서 생성·수정은 카테고리의 `write_permission` 최소 등급(기본 club_member)도 검사한다. 노드별 독립 설정이며 부모 권한을 상속하지 않는다. 기존 SQLite 카테고리는 core/database.py가 서버 시작 시 컬럼을 자동 보완한다. 문서별 권한을 통과해도 카테고리 작성 권한이 없으면 거부한다.
-- 문서별 권한은 `Permissions` 테이블에 action별 JSON 리스트(`update`/`move`/`delete`). 문서 생성 시 기본값은 update = 전체 로그인 등급, move·delete = admin.
-- `check_document_permission`은 `None`을 안전하게 거부하지만, 로그인 자체가 필수인 엔드포인트는 **`current_user is None` 체크를 직접 넣는 패턴**을 따를 것 (`POST /documents`, `POST /tags`, `POST /categories` 참고)
-- **문서 작성자**(`WikiDoc.created_by`)는 자기 문서를 권한 체크 없이 삭제 가능. 삭제에만 적용되며 update/move에는 적용하지 않는다
+- 권한 정책은 `core/permissions.py`에 중앙화한다. `Role` Enum은 문자열 값·grade·label을 가진다. 등급 비교는 `has_minimum_role`, 전역 행동은 `can_perform` / `require_action`, 문서는 `can_perform_document`를 사용한다. 라우터에 역할 문자열 비교나 별도 등급표를 추가하지 말 것. 관리자 전용은 반드시 `is_admin`을 통해 실제 관리자 역할을 확인한다.
+- 인증은 DB의 현재 역할과 session_version을 확인한다. 비밀번호 재설정은 session_version을 증가시켜 기존 액세스/MFA 토큰을 폐기한다. 가입 인증 상태 조회와 토큰 없는 가입에는 이메일 발송 요청에 결합된 registration_secret이 필요하다. 사용자 응답은 공개 필드 허용 목록을 사용하고 인증 비밀/내부 상태를 노출하지 않는다.
+- 사용자 권한: `admin`(100) / `club_member`(50) / `login_user`(10) (비로그인은 `current_user=None`). 새 역할은 `Role` Enum에 추가한다.
+- 문서 생성·수정은 자신과 모든 조상 카테고리의 최소 권한 중 가장 높은 제한을 적용한다. 기본값 club_member. 부모보다 낮은 설정 저장은 거부하며, 이동/상위 설정 변경은 기존 하위 문서에 즉시 적용한다. 관리자는 권한 제한을 우회한다.
+- 문서별 Permissions 목록을 공통 등급 검사와 함께 유지한다. update는 club_member 이상, rename도 club_member 이상이며 update 제한을 함께 검사한다. move/delete는 실제 admin만 허용한다. 작성자 삭제 예외는 없다. 관리자는 모든 권한 제한을 우회한다. 기존 DB 데이터/스키마 변경은 사용자 승인 후에만 적용한다.
+- 문서·태그·카테고리 생성의 로그인·역할 검사는 `require_action(..., anonymous_status=401)`을 사용한다. 계정 본인용 인증은 기존 `current_user is None` / username 확인을 유지한다.
 - `DELETE /tags`, `PUT|DELETE /categories`는 admin 전용
 
 ### Rate limiting
@@ -162,3 +163,4 @@ Alembic은 아직 도입하지 않았다.
 - `.env` — 시크릿. 절대 커밋하지 말 것 (`.gitignore` 포함)
 - `wiki.db` — 실제 데이터. API/마이그레이션을 통해서만 변경하고, 손대야 하면 `db_backups/`에 사본부터
 - `db_backups/`, `logs/`, `__pycache__/` — 자동 생성물, git 포함 금지
+- POST /logout은 현재 토큰 해시를 RevokedToken에 영속 저장한다. 인증 시 폐기 토큰을 거부한다. 프론트는 서버 성공 후 로컬 토큰을 삭제한다. 다른 기기 세션은 유지한다.

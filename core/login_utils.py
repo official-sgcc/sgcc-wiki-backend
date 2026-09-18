@@ -3,6 +3,9 @@ import jwt
 import os
 import re
 import time
+import hashlib
+import hmac
+from uuid import uuid4
 import pyotp
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
@@ -59,18 +62,18 @@ def verify_password(plain_password: str, encrypted_password: str):
 
     return bcrypt.checkpw(plain_password_bytes, encrypted_password_bytes)
 
-def create_jwt_token(username: str) -> str:
-    data = {'sub': username, 'purpose': 'access', 'exp': datetime.now(timezone.utc) + timedelta(minutes=JWT_TOKEN_EXPIRE_MINUTES)}
+def create_jwt_token(username: str, session_version: int = 0) -> str:
+    data = {'sub': username, 'purpose': 'access', 'jti': uuid4().hex, 'session_version': session_version, 'exp': datetime.now(timezone.utc) + timedelta(minutes=JWT_TOKEN_EXPIRE_MINUTES)}
 
     return jwt.encode(data, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
-def verify_jwt_token(token: str) -> str:
+def verify_jwt_token(token: str, session_version: int | None = None) -> str:
     try:
         payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
         username: str = payload.get('sub')
         # purpose를 강제하지 않으면 같은 키로 서명된 mfa/email_verify 토큰이
         # 정식 세션 토큰으로 통과해 2FA가 우회된다.
-        if username is None or payload.get('purpose') != 'access':
+        if username is None or payload.get('purpose') != 'access' or (session_version is not None and payload.get('session_version', 0) != session_version):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail='Invalid token'
@@ -87,18 +90,19 @@ def verify_jwt_token(token: str) -> str:
             detail='Invalid token'
         )
 
-def create_mfa_token(username: str) -> str:
+def create_mfa_token(username: str, session_version: int = 0) -> str:
     data = {
         'sub': username,
         'purpose': 'mfa',
+        'session_version': session_version,
         'exp': datetime.now(timezone.utc) + timedelta(minutes=MFA_TOKEN_EXPIRE_MINUTES),
     }
     return jwt.encode(data, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
-def verify_mfa_token(token: str) -> str:
+def verify_mfa_token(token: str, session_version: int | None = None) -> str:
     try:
         payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
-        if payload.get('purpose') != 'mfa' or payload.get('sub') is None:
+        if payload.get('purpose') != 'mfa' or payload.get('sub') is None or (session_version is not None and payload.get('session_version', 0) != session_version):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid MFA token')
         return payload['sub']
     except jwt.ExpiredSignatureError:
@@ -137,14 +141,29 @@ def verify_password_reset_token(token: str, password_hash: str) -> str:
 
 # The email claim is embedded so that changing the email later invalidates any
 # outstanding verification link (the endpoint compares it to the current email).
-def create_email_verification_token(username: str, email: str) -> str:
+def create_email_verification_token(username: str, email: str, registration_secret: str | None = None) -> str:
     data = {
         'sub': username,
         'email': email,
         'purpose': 'email_verify',
+        'jti': uuid4().hex,
         'exp': datetime.now(timezone.utc) + timedelta(minutes=EMAIL_VERIFY_EXPIRE_MINUTES),
     }
+    if registration_secret:
+        data['registration_hash'] = hashlib.sha256(registration_secret.encode()).hexdigest()
     return jwt.encode(data, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+
+def matches_registration_secret(token: str, secret: str | None) -> bool:
+    if not secret:
+        return False
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        expected = payload.get('registration_hash')
+        return payload.get('purpose') == 'email_verify' and isinstance(expected, str) and hmac.compare_digest(
+            expected, hashlib.sha256(secret.encode()).hexdigest())
+    except jwt.InvalidTokenError:
+        return False
 
 def verify_email_verification_token(token: str) -> tuple[str, str]:
     try:

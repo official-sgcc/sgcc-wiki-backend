@@ -1,12 +1,15 @@
+from tests.seed_data import seed_tag
+
 def test_create_tag_requires_auth(client):
     resp = client.post('/tags', json={'name': 'Python'})
-    assert resp.status_code == 401
+    assert resp.status_code == 405
 
 
 def test_create_and_list_tag(client, club_headers):
     headers, _ = club_headers('alice123')
     resp = client.post('/tags', json={'name': 'Python'}, headers=headers)
-    assert resp.status_code == 200
+    assert resp.status_code == 405
+    seed_tag('Python')
 
     resp = client.get('/tags')
     names = [t['name'] for t in resp.json()]
@@ -15,7 +18,7 @@ def test_create_and_list_tag(client, club_headers):
 
 def test_delete_tag_admin_only(client, club_headers, admin_headers):
     user_headers, _ = club_headers('alice123')
-    client.post('/tags', json={'name': 'Python'}, headers=user_headers)
+    seed_tag('Python')
 
     resp = client.delete('/tags/Python', headers=user_headers)
     assert resp.status_code == 403
@@ -27,8 +30,8 @@ def test_delete_tag_admin_only(client, club_headers, admin_headers):
 
 def test_delete_tag_cascades_from_documents(client, club_headers, admin_headers):
     user_headers, _ = club_headers('alice123')
-    client.post('/tags', json={'name': 'Python'}, headers=user_headers)
-    client.post('/categories', json={'name': 'General'}, headers=user_headers)
+    seed_tag('Python')
+    client.post('/categories', json={'name': 'General'}, headers=admin_headers[0])
     client.post('/documents', json={
         'title': 'Doc1',
         'content': 'hello',
@@ -45,11 +48,11 @@ def test_delete_tag_cascades_from_documents(client, club_headers, admin_headers)
     assert 'Python' not in tag_names
 
 
-def test_get_documents_by_tag(client, club_headers):
+def test_get_documents_by_tag(client, club_headers, admin_headers):
     headers, _ = club_headers('alice123')
-    client.post('/tags', json={'name': 'Python'}, headers=headers)
-    client.post('/tags', json={'name': 'Rust'}, headers=headers)
-    client.post('/categories', json={'name': 'General'}, headers=headers)
+    seed_tag('Python')
+    seed_tag('Rust')
+    client.post('/categories', json={'name': 'General'}, headers=admin_headers[0])
     for title, tags in [('Doc1', ['Python']), ('Doc2', ['Python', 'Rust']), ('Doc3', ['Rust'])]:
         client.post('/documents', json={
             'title': title,
@@ -74,7 +77,7 @@ def test_create_category_requires_auth(client):
 
 def test_delete_category_in_use_rejected(client, club_headers, admin_headers):
     user_headers, _ = club_headers('alice123')
-    client.post('/categories', json={'name': 'General'}, headers=user_headers)
+    client.post('/categories', json={'name': 'General'}, headers=admin_headers[0])
     client.post('/documents', json={
         'title': 'Doc1',
         'content': 'hello',
@@ -89,24 +92,24 @@ def test_delete_category_in_use_rejected(client, club_headers, admin_headers):
 
 def test_delete_unused_category_succeeds(client, admin_headers):
     admin, _ = admin_headers
-    client.post('/categories', json={'name': 'Orphan'}, headers=admin)
+    client.post('/categories', json={'name': 'Orphan'}, headers=admin_headers[0])
     resp = client.delete('/categories/Orphan', headers=admin)
     assert resp.status_code == 200
     assert 'message' in resp.json()
 
 
-def test_create_category_rejects_missing_parent(client, club_headers):
+def test_create_category_rejects_missing_parent(client, club_headers, admin_headers):
     # 유령 부모 → 트리 누락/순환(무한 재귀) 방지: 없는 부모 지정 시 400.
     headers, _ = club_headers('alice123')
-    resp = client.post('/categories', json={'name': 'Child', 'parent': 'ghost'}, headers=headers)
+    resp = client.post('/categories', json={'name': 'Child', 'parent': 'ghost'}, headers=admin_headers[0])
     assert resp.status_code == 400
 
 
-def test_category_tree_nesting(client, club_headers):
+def test_category_tree_nesting(client, club_headers, admin_headers):
     # build_category_node 재귀 검증: GET /categories(트리)와 GET /categories/{name}
     headers, _ = club_headers('alice123')
-    client.post('/categories', json={'name': 'Parent'}, headers=headers)
-    client.post('/categories', json={'name': 'Child', 'parent': 'Parent'}, headers=headers)
+    client.post('/categories', json={'name': 'Parent'}, headers=admin_headers[0])
+    client.post('/categories', json={'name': 'Child', 'parent': 'Parent'}, headers=admin_headers[0])
 
     tree = client.get('/categories').json()
     parent = next(c for c in tree if c['name'] == 'Parent')
@@ -117,10 +120,10 @@ def test_category_tree_nesting(client, club_headers):
     assert [c['name'] for c in node['children']] == ['Child']
 
 
-def test_get_documents_by_category(client, club_headers):
+def test_get_documents_by_category(client, club_headers, admin_headers):
     headers, _ = club_headers('alice123')
-    client.post('/categories', json={'name': 'Parent'}, headers=headers)
-    client.post('/categories', json={'name': 'Child', 'parent': 'Parent'}, headers=headers)
+    client.post('/categories', json={'name': 'Parent'}, headers=admin_headers[0])
+    client.post('/categories', json={'name': 'Child', 'parent': 'Parent'}, headers=admin_headers[0])
     for title, cat in [('P1', 'Parent'), ('P2', 'Parent'), ('C1', 'Child')]:
         client.post('/documents', json={
             'title': title,
@@ -138,10 +141,10 @@ def test_get_documents_by_category(client, club_headers):
     assert resp.status_code == 404
 
 
-def test_get_documents_by_category_recursive(client, club_headers):
+def test_get_documents_by_category_recursive(client, club_headers, admin_headers):
     headers, _ = club_headers('alice123')
-    client.post('/categories', json={'name': 'Parent'}, headers=headers)
-    client.post('/categories', json={'name': 'Child', 'parent': 'Parent'}, headers=headers)
+    client.post('/categories', json={'name': 'Parent'}, headers=admin_headers[0])
+    client.post('/categories', json={'name': 'Child', 'parent': 'Parent'}, headers=admin_headers[0])
     for title, cat in [('P1', 'Parent'), ('C1', 'Child')]:
         client.post('/documents', json={
             'title': title,

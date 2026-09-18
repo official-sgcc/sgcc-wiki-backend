@@ -1,7 +1,9 @@
-def _seed(client, headers):
-    client.post('/tags', json={'name': 'Python'}, headers=headers)
-    client.post('/tags', json={'name': 'PythonDev'}, headers=headers)
-    client.post('/categories', json={'name': 'General'}, headers=headers)
+from tests.seed_data import seed_tag
+
+def _seed(client, headers, admin_headers):
+    seed_tag('Python')
+    seed_tag('PythonDev')
+    client.post('/categories', json={'name': 'General'}, headers=admin_headers[0])
 
     for i, title in enumerate(['Apple', 'Banana', 'PythonGuide']):
         client.post('/documents', json={
@@ -17,18 +19,18 @@ def test_search_empty_keyword_rejected(client):
     assert resp.status_code == 400
 
 
-def test_search_by_title(client, club_headers):
+def test_search_by_title(client, club_headers, admin_headers):
     headers, _ = club_headers('alice123')
-    _seed(client, headers)
+    _seed(client, headers, admin_headers)
     resp = client.get('/search?keyword=Apple&search_type=title')
     assert resp.status_code == 200
     titles = [d['title'] for d in resp.json()]
     assert titles == ['Apple']
 
 
-def test_search_tag_exact_match(client, club_headers):
+def test_search_tag_exact_match(client, club_headers, admin_headers):
     headers, _ = club_headers('alice123')
-    _seed(client, headers)
+    _seed(client, headers, admin_headers)
 
     resp = client.get('/search?keyword=Python&search_type=tag')
     assert resp.status_code == 200
@@ -36,9 +38,9 @@ def test_search_tag_exact_match(client, club_headers):
     assert titles == ['PythonGuide']
 
 
-def test_pagination_on_documents(client, club_headers):
+def test_pagination_on_documents(client, club_headers, admin_headers):
     headers, _ = club_headers('alice123')
-    _seed(client, headers)
+    _seed(client, headers, admin_headers)
 
     full = client.get('/documents').json()
     assert len(full) == 3

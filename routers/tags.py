@@ -6,6 +6,7 @@ from sqlmodel import Session, select
 from core.config import logger
 from core.database import engine
 from core.deps import get_current_user
+from core.permissions import Action, require_action
 from schemas.tags import WikiTag, WikiTagCreate
 from schemas.wiki_doc import WikiDoc
 from schemas.wiki_user import WikiUser
@@ -21,34 +22,6 @@ async def get_tags():
     """
     with Session(engine) as session:
         return session.exec(select(WikiTag)).all()
-
-@router.post('/tags')
-async def create_tag(tag_in: WikiTagCreate, current_user: WikiUser = Depends(get_current_user)):
-    """새 태그를 생성한다. (로그인 필요)
-
-    Args:
-        tag_in: 생성할 태그(name).
-        current_user: 인증 사용자. None이면 401.
-
-    Returns:
-        dict: `{'message': '...has been created.'}`
-
-    Raises:
-        HTTPException 401: 비로그인 상태.
-        HTTPException 400: 같은 이름의 태그가 이미 있을 때.
-    """
-    if current_user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Login required to create a tag.')
-    with Session(engine) as session:
-        if session.get(WikiTag, tag_in.name):
-            raise HTTPException(status_code=400, detail='Tag name already exists.')
-
-        tag = WikiTag(**tag_in.model_dump())
-        session.add(tag)
-        session.commit()
-        session.refresh(tag)
-        logger.info('tag created: %s by %s', tag_in.name, current_user.username)
-        return {'message': f'The tag named {tag_in.name} has been created.'}
 
 @router.get('/tags/{name}/documents')
 async def get_documents_by_tag(name: str, limit: int | None = None, offset: int = 0):
@@ -100,8 +73,7 @@ async def delete_tag(name: str, current_user: WikiUser = Depends(get_current_use
         HTTPException 403: 비로그인이거나 admin이 아닐 때.
         HTTPException 404: 삭제할 태그가 없을 때.
     """
-    if current_user is None or current_user.permission != 'admin':
-        raise HTTPException(status_code=403, detail='Admin permission required to delete tags.')
+    require_action(current_user, Action.ADMIN)
     with Session(engine) as session:
         if not (tag := session.get(WikiTag, name)):
             raise HTTPException(status_code=404, detail='Cannot find tag to delete.')

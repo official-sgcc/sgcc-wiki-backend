@@ -340,7 +340,8 @@ def test_set_email_and_verify_flow(client, auth_headers):
     assert me['email'] == 'alice@example.com'
     assert me['email_verified'] is False
 
-    token = create_email_verification_token(username, 'alice@example.com')
+    from tests.test_email_verification import get_verification_token
+    token = get_verification_token(username, 'alice@example.com')
     assert client.post('/email/verify', json={'token': token}).status_code == 200
 
     me = client.get(f'/users/{username}', headers=headers).json()
@@ -383,7 +384,8 @@ def test_password_reset_requires_verified_email(client, auth_headers, monkeypatc
     assert sent == []
 
     # 이메일 인증 후에는 링크가 발송된다.
-    token = create_email_verification_token(username, 'alice@example.com')
+    from tests.test_email_verification import get_verification_token
+    token = get_verification_token(username, 'alice@example.com')
     client.post('/email/verify', json={'token': token})
     assert client.post('/password-reset/request', json={'username': username}).status_code == 200
     assert sent == ['alice@example.com']

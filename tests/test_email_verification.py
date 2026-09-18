@@ -18,7 +18,7 @@ def get_verification_token(username, email):
 
 def test_register_with_server_side_verified_record(client):
     # Send verification email which creates a server-side EmailVerification record
-    resp = client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice@example.com'})
+    resp = client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice@example.com', 'registration_secret': 'browser-secret'})
     assert resp.status_code == 200
 
     # Simulate the user clicking the link on another device by calling /email/verify
@@ -29,6 +29,7 @@ def test_register_with_server_side_verified_record(client):
     resp = client.post('/register', json={
         'username': 'alice123',
         'password': 'Password1',
+        'registration_secret': 'browser-secret',
         'email': 'alice@example.com',
     })
     assert resp.status_code == 200
@@ -41,17 +42,17 @@ def test_register_with_server_side_verified_record(client):
 
 def test_register_verify_status_endpoint(client):
     # Create server-side record
-    resp = client.post('/register/verify-email', json={'username': 'bob123', 'email': 'bob@example.com'})
+    resp = client.post('/register/verify-email', json={'username': 'bob123', 'email': 'bob@example.com', 'registration_secret': 'browser-secret'})
     assert resp.status_code == 200
 
     # Initially not verified
-    resp = client.post('/register/verify-status', json={'username': 'bob123', 'email': 'bob@example.com'})
+    resp = client.post('/register/verify-status', json={'username': 'bob123', 'email': 'bob@example.com', 'registration_secret': 'browser-secret'})
     assert resp.status_code == 200
     assert resp.json() == {'verified': False}
 
     # After clicking link (token verification) the status should be true
     token = get_verification_token('bob123', 'bob@example.com')
     assert client.post('/email/verify', json={'token': token}).status_code == 200
-    resp = client.post('/register/verify-status', json={'username': 'bob123', 'email': 'bob@example.com'})
+    resp = client.post('/register/verify-status', json={'username': 'bob123', 'email': 'bob@example.com', 'registration_secret': 'browser-secret'})
     assert resp.status_code == 200
     assert resp.json() == {'verified': True}

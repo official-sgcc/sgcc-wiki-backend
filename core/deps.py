@@ -7,7 +7,10 @@ from core.login_utils import verify_jwt_token
 from schemas.categories import WikiCategory
 from schemas.permissions import Permissions
 from schemas.tags import WikiTag
-from schemas.wiki_user import WikiUser
+from schemas.wiki_user import WikiUser, RevokedToken
+import hashlib
+from schemas.wiki_doc import WikiDoc
+from core.permissions import DOCUMENT_FIELDS, category_name, can_write_category, can_perform_document
 
 async def get_current_user(
     auth: str | None = Header(None),
@@ -46,46 +49,33 @@ async def get_current_user(
     username = verify_jwt_token(token)
 
     with Session(engine) as session:
+        if session.get(RevokedToken, hashlib.sha256(token.encode()).hexdigest()):
+            raise HTTPException(status_code=401, detail='Token has been revoked')
         user = session.get(WikiUser, username)
         if not user:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='User not found')
+        verify_jwt_token(token, session_version=user.session_version)
         return user
 
 def check_category_write_permission(session: Session, current_user: WikiUser, category):
-    name = category.get('name') if isinstance(category, dict) else getattr(category, 'name', None)
+    name = category_name(category)
     stored_category = session.get(WikiCategory, name) if name else None
     if stored_category is None:
         raise HTTPException(status_code=400, detail='Category does not exist.')
-    levels = {'login_user': 0, 'club_member': 1, 'admin': 2}
-    user_level = levels.get(current_user.permission, -1) if current_user else -1
-    required_level = levels.get(stored_category.write_permission, 3)
-    if user_level < required_level:
+    if not can_write_category(current_user, stored_category, lambda name: session.get(WikiCategory, name)):
         raise HTTPException(status_code=403, detail='Category write permission required.')
 
 
 def check_document_permission(session: Session, current_user: WikiUser, title: str, action: str):
-    """문서별 권한(Permissions 테이블)으로 특정 동작 수행 가능 여부를 검사한다.
+    """문서의 현재 카테고리와 조상 제한으로 검사한다. admin은 우선 통과한다.
 
-    Permissions는 문서마다 action별 허용 권한 등급 리스트를 JSON으로 갖는다
-    (예: update=['admin', 'club_member', 'login_user']). current_user의 권한 등급이
-    해당 action의 허용 목록에 들어 있어야 통과한다.
-
-    Args:
-        session: 활성 DB 세션.
-        current_user: 현재 사용자. None(비로그인)이면 권한 등급을 None으로 취급해 거부된다.
-        title: 대상 문서 제목(Permissions PK).
-        action: 검사할 동작. 'update' / 'move' / 'delete' 중 하나.
-
-    Raises:
-        HTTPException 403: 문서 권한 설정이 없거나, 허용 목록이 비었거나,
-                           current_user의 권한 등급이 목록에 없을 때.
+    전역 최소 등급, 문서별 Permissions 목록, 카테고리 상속 제한을 함께 검사한다.
     """
     permission = session.get(Permissions, title)
-    if not permission:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Document permissions not configured')
-    allowed = getattr(permission, action, None)
-    current_user_permission = current_user.permission if current_user else None
-    if not allowed or current_user_permission not in allowed:
+    document = session.get(WikiDoc, title)
+    category = session.get(WikiCategory, category_name(document.category)) if document else None
+    document_action = next((key for key, field in DOCUMENT_FIELDS.items() if field == action), None)
+    if not document or not can_perform_document(current_user, document_action, document, permission, category, lambda name: session.get(WikiCategory, name)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f'Requires document-specific \'{action}\' permission')
 
 def validate_tags_and_category(session: Session, tags, category, current_user=None, create_missing_tags=False):
