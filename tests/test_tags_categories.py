@@ -3,8 +3,8 @@ def test_create_tag_requires_auth(client):
     assert resp.status_code == 401
 
 
-def test_create_and_list_tag(client, auth_headers):
-    headers, _ = auth_headers('alice123')
+def test_create_and_list_tag(client, club_headers):
+    headers, _ = club_headers('alice123')
     resp = client.post('/tags', json={'name': 'Python'}, headers=headers)
     assert resp.status_code == 200
 
@@ -13,8 +13,8 @@ def test_create_and_list_tag(client, auth_headers):
     assert 'Python' in names
 
 
-def test_delete_tag_admin_only(client, auth_headers, admin_headers):
-    user_headers, _ = auth_headers('alice123')
+def test_delete_tag_admin_only(client, club_headers, admin_headers):
+    user_headers, _ = club_headers('alice123')
     client.post('/tags', json={'name': 'Python'}, headers=user_headers)
 
     resp = client.delete('/tags/Python', headers=user_headers)
@@ -25,8 +25,8 @@ def test_delete_tag_admin_only(client, auth_headers, admin_headers):
     assert resp.status_code == 200
 
 
-def test_delete_tag_cascades_from_documents(client, auth_headers, admin_headers):
-    user_headers, _ = auth_headers('alice123')
+def test_delete_tag_cascades_from_documents(client, club_headers, admin_headers):
+    user_headers, _ = club_headers('alice123')
     client.post('/tags', json={'name': 'Python'}, headers=user_headers)
     client.post('/categories', json={'name': 'General'}, headers=user_headers)
     client.post('/documents', json={
@@ -45,8 +45,8 @@ def test_delete_tag_cascades_from_documents(client, auth_headers, admin_headers)
     assert 'Python' not in tag_names
 
 
-def test_get_documents_by_tag(client, auth_headers):
-    headers, _ = auth_headers('alice123')
+def test_get_documents_by_tag(client, club_headers):
+    headers, _ = club_headers('alice123')
     client.post('/tags', json={'name': 'Python'}, headers=headers)
     client.post('/tags', json={'name': 'Rust'}, headers=headers)
     client.post('/categories', json={'name': 'General'}, headers=headers)
@@ -72,8 +72,8 @@ def test_create_category_requires_auth(client):
     assert resp.status_code == 401
 
 
-def test_delete_category_in_use_rejected(client, auth_headers, admin_headers):
-    user_headers, _ = auth_headers('alice123')
+def test_delete_category_in_use_rejected(client, club_headers, admin_headers):
+    user_headers, _ = club_headers('alice123')
     client.post('/categories', json={'name': 'General'}, headers=user_headers)
     client.post('/documents', json={
         'title': 'Doc1',
@@ -95,16 +95,16 @@ def test_delete_unused_category_succeeds(client, admin_headers):
     assert 'message' in resp.json()
 
 
-def test_create_category_rejects_missing_parent(client, auth_headers):
+def test_create_category_rejects_missing_parent(client, club_headers):
     # 유령 부모 → 트리 누락/순환(무한 재귀) 방지: 없는 부모 지정 시 400.
-    headers, _ = auth_headers('alice123')
+    headers, _ = club_headers('alice123')
     resp = client.post('/categories', json={'name': 'Child', 'parent': 'ghost'}, headers=headers)
     assert resp.status_code == 400
 
 
-def test_category_tree_nesting(client, auth_headers):
+def test_category_tree_nesting(client, club_headers):
     # build_category_node 재귀 검증: GET /categories(트리)와 GET /categories/{name}
-    headers, _ = auth_headers('alice123')
+    headers, _ = club_headers('alice123')
     client.post('/categories', json={'name': 'Parent'}, headers=headers)
     client.post('/categories', json={'name': 'Child', 'parent': 'Parent'}, headers=headers)
 
@@ -117,8 +117,8 @@ def test_category_tree_nesting(client, auth_headers):
     assert [c['name'] for c in node['children']] == ['Child']
 
 
-def test_get_documents_by_category(client, auth_headers):
-    headers, _ = auth_headers('alice123')
+def test_get_documents_by_category(client, club_headers):
+    headers, _ = club_headers('alice123')
     client.post('/categories', json={'name': 'Parent'}, headers=headers)
     client.post('/categories', json={'name': 'Child', 'parent': 'Parent'}, headers=headers)
     for title, cat in [('P1', 'Parent'), ('P2', 'Parent'), ('C1', 'Child')]:
@@ -138,8 +138,8 @@ def test_get_documents_by_category(client, auth_headers):
     assert resp.status_code == 404
 
 
-def test_get_documents_by_category_recursive(client, auth_headers):
-    headers, _ = auth_headers('alice123')
+def test_get_documents_by_category_recursive(client, club_headers):
+    headers, _ = club_headers('alice123')
     client.post('/categories', json={'name': 'Parent'}, headers=headers)
     client.post('/categories', json={'name': 'Child', 'parent': 'Parent'}, headers=headers)
     for title, cat in [('P1', 'Parent'), ('C1', 'Child')]:
