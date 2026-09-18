@@ -16,8 +16,8 @@ def test_create_document_requires_auth(client):
     assert resp.status_code == 401
 
 
-def test_create_and_get_document(client, auth_headers):
-    headers, _ = auth_headers('alice123')
+def test_create_and_get_document(client, club_headers):
+    headers, _ = club_headers('alice123')
     _prep_tag_and_category(client, headers)
 
     resp = client.post('/documents', json={
@@ -57,8 +57,8 @@ def test_move_document_updates_title_and_versions(client, admin_headers):
     assert len(versions) == 1
 
 
-def test_create_document_auto_creates_missing_tag(client, auth_headers):
-    headers, _ = auth_headers('alice123')
+def test_create_document_auto_creates_missing_tag(client, club_headers):
+    headers, _ = club_headers('alice123')
     client.post('/categories', json={'name': 'General'}, headers=headers)
 
     resp = client.post('/documents', json={
@@ -73,8 +73,8 @@ def test_create_document_auto_creates_missing_tag(client, auth_headers):
     assert any(tag['name'] == 'NonExisting' for tag in tags)
 
 
-def test_update_document_auto_creates_missing_tag(client, auth_headers):
-    headers, _ = auth_headers('alice123')
+def test_update_document_auto_creates_missing_tag(client, club_headers):
+    headers, _ = club_headers('alice123')
     client.post('/categories', json={'name': 'General'}, headers=headers)
     client.post('/documents', json={
         'title': 'DocY',
@@ -93,8 +93,8 @@ def test_update_document_auto_creates_missing_tag(client, auth_headers):
     assert any(tag['name'] == 'NewTag' for tag in tags)
 
 
-def test_create_document_rejects_missing_category(client, auth_headers):
-    headers, _ = auth_headers('alice123')
+def test_create_document_rejects_missing_category(client, club_headers):
+    headers, _ = club_headers('alice123')
 
     resp = client.post('/documents', json={
         'title': 'DocX',
@@ -105,8 +105,8 @@ def test_create_document_rejects_missing_category(client, auth_headers):
     assert resp.status_code == 400
 
 
-def test_create_document_does_not_create_comment_permission(client, auth_headers):
-    headers, _ = auth_headers('alice123')
+def test_create_document_does_not_create_comment_permission(client, club_headers):
+    headers, _ = club_headers('alice123')
     client.post('/categories', json={'name': 'General'}, headers=headers)
 
     resp = client.post('/documents', json={
@@ -131,9 +131,9 @@ def test_create_document_does_not_create_comment_permission(client, auth_headers
     assert not hasattr(permissions, 'comment')
 
 
-def test_update_document_category_move_requires_admin(client, auth_headers, admin_headers):
+def test_update_document_category_move_requires_admin(client, club_headers, admin_headers):
     # 카테고리 변경(이동)은 move 권한(기본 admin) 필요. 일반 사용자는 403, admin은 성공.
-    headers, _ = auth_headers('alice123')
+    headers, _ = club_headers('alice123')
     _prep_tag_and_category(client, headers)
     client.post('/categories', json={'name': 'Other'}, headers=headers)
     client.post('/documents', json={
@@ -156,8 +156,8 @@ def test_update_document_category_move_requires_admin(client, auth_headers, admi
     assert resp.status_code == 200
 
 
-def test_update_document_creates_version(client, auth_headers):
-    headers, _ = auth_headers('alice123')
+def test_update_document_creates_version(client, club_headers):
+    headers, _ = club_headers('alice123')
     _prep_tag_and_category(client, headers)
 
     client.post('/documents', json={
@@ -174,8 +174,8 @@ def test_update_document_creates_version(client, auth_headers):
     assert len(versions) == 2
 
 
-def test_delete_document_other_users_forbidden(client, auth_headers, admin_headers):
-    alice_headers, _ = auth_headers('alice123')
+def test_delete_document_other_users_forbidden(client, club_headers, admin_headers):
+    alice_headers, _ = club_headers('alice123')
     _prep_tag_and_category(client, alice_headers)
     client.post('/documents', json={
         'title': 'Doc1',
@@ -184,7 +184,7 @@ def test_delete_document_other_users_forbidden(client, auth_headers, admin_heade
         'tags': [],
     }, headers=alice_headers)
 
-    bob_headers, _ = auth_headers('bob456')
+    bob_headers, _ = club_headers('bob456')
     resp = client.delete('/documents/Doc1', headers=bob_headers)
     assert resp.status_code == 403
 
@@ -193,8 +193,8 @@ def test_delete_document_other_users_forbidden(client, auth_headers, admin_heade
     assert resp.status_code == 200
 
 
-def test_delete_document_creator_can_delete(client, auth_headers):
-    headers, _ = auth_headers('alice123')
+def test_delete_document_creator_can_delete(client, club_headers):
+    headers, _ = club_headers('alice123')
     _prep_tag_and_category(client, headers)
     client.post('/documents', json={
         'title': 'Doc1',
@@ -207,8 +207,8 @@ def test_delete_document_creator_can_delete(client, auth_headers):
     assert resp.status_code == 200
 
 
-def test_get_document_diff(client, auth_headers):
-    headers, _ = auth_headers('alice123')
+def test_get_document_diff(client, club_headers):
+    headers, _ = club_headers('alice123')
     _prep_tag_and_category(client, headers)
     client.post('/documents', json={
         'title': 'Doc1',
@@ -223,8 +223,8 @@ def test_get_document_diff(client, auth_headers):
     assert isinstance(resp.json(), list)
 
 
-def test_get_document_diff_rejects_first_version(client, auth_headers):
-    headers, _ = auth_headers('alice123')
+def test_get_document_diff_rejects_first_version(client, club_headers):
+    headers, _ = club_headers('alice123')
     _prep_tag_and_category(client, headers)
     client.post('/documents', json={
         'title': 'Doc1',
@@ -237,8 +237,8 @@ def test_get_document_diff_rejects_first_version(client, auth_headers):
     assert resp.status_code == 400
 
 
-def test_slash_title_query_parameter_lifecycle(client, auth_headers, admin_headers):
-    headers, _ = auth_headers('alice123')
+def test_slash_title_query_parameter_lifecycle(client, club_headers, admin_headers):
+    headers, _ = club_headers('alice123')
     admin, _ = admin_headers
     _prep_tag_and_category(client, headers)
     title = 'React/Router 사용법'

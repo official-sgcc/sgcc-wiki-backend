@@ -17,8 +17,8 @@ def test_search_empty_keyword_rejected(client):
     assert resp.status_code == 400
 
 
-def test_search_by_title(client, auth_headers):
-    headers, _ = auth_headers('alice123')
+def test_search_by_title(client, club_headers):
+    headers, _ = club_headers('alice123')
     _seed(client, headers)
     resp = client.get('/search?keyword=Apple&search_type=title')
     assert resp.status_code == 200
@@ -26,8 +26,8 @@ def test_search_by_title(client, auth_headers):
     assert titles == ['Apple']
 
 
-def test_search_tag_exact_match(client, auth_headers):
-    headers, _ = auth_headers('alice123')
+def test_search_tag_exact_match(client, club_headers):
+    headers, _ = club_headers('alice123')
     _seed(client, headers)
 
     resp = client.get('/search?keyword=Python&search_type=tag')
@@ -36,8 +36,8 @@ def test_search_tag_exact_match(client, auth_headers):
     assert titles == ['PythonGuide']
 
 
-def test_pagination_on_documents(client, auth_headers):
-    headers, _ = auth_headers('alice123')
+def test_pagination_on_documents(client, club_headers):
+    headers, _ = club_headers('alice123')
     _seed(client, headers)
 
     full = client.get('/documents').json()

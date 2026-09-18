@@ -60,6 +60,22 @@ def auth_headers(client):
 
 
 @pytest.fixture
+def club_headers(auth_headers):
+    def create(*args, **kwargs):
+        headers, username = auth_headers(*args, **kwargs)
+        from core.database import engine
+        from schemas.wiki_user import WikiUser
+        from sqlmodel import Session
+        with Session(engine) as session:
+            user = session.get(WikiUser, username)
+            user.permission = 'club_member'
+            session.add(user)
+            session.commit()
+        return headers, username
+    return create
+
+
+@pytest.fixture
 def admin_headers(client, monkeypatch):
     from core.login_utils import hash_password
     from core.database import engine
