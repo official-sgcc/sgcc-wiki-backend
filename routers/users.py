@@ -9,6 +9,8 @@ from core.config import FRONTEND_URL, RESERVED_USERNAMES, limiter, logger
 from core.database import engine
 from datetime import datetime
 from core.deps import get_current_user
+from core.permissions import Action, Role, require_action, permission_context, can_write_category
+from schemas.categories import WikiCategory
 from core.login_utils import (
     hash_password, verify_password, create_jwt_token,
     validate_username, validate_password, validate_email,
@@ -17,6 +19,7 @@ from core.login_utils import (
     verify_email_verification_token,
     generate_totp_secret, totp_provisioning_uri, matched_totp_step,
     DUMMY_PASSWORD_HASH, PASSWORD_RESET_EXPIRE_MINUTES,
+    matches_registration_secret,
 )
 from core.maintenance import reserve_email_slot, send_email_verification, send_password_reset_email, send_test_email_now
 from schemas.wiki_doc import WikiDocVersion
@@ -32,6 +35,40 @@ from schemas.wiki_user import EmailVerification
 EMAIL_THROTTLED_DETAIL = 'Too many emails requested for this address. Please try again later.'
 
 router = APIRouter()
+
+
+@router.post('/logout')
+async def logout(request: Request, current_user: WikiUser = Depends(get_current_user)):
+    """Revoke the presented access token across processes and restarts."""
+    import hashlib
+    import time
+    import jwt
+    from sqlalchemy import delete
+    from sqlalchemy.dialects.sqlite import insert
+    from schemas.wiki_user import RevokedToken
+    from core.login_utils import JWT_SECRET_KEY, JWT_ALGORITHM
+    if current_user is None:
+        raise HTTPException(status_code=401, detail='Login required')
+    authorization = request.headers.get('authorization', '')
+    token = authorization[7:].strip() if authorization.lower().startswith('bearer ') else request.headers.get('auth')
+    claims = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+    with Session(engine) as session:
+        session.exec(delete(RevokedToken).where(RevokedToken.expires_at < int(time.time())))
+        session.exec(insert(RevokedToken).values(token_hash=hashlib.sha256(token.encode()).hexdigest(), expires_at=claims['exp']).on_conflict_do_nothing())
+        session.commit()
+    return {'message': 'Logged out'}
+
+
+@router.get('/permissions')
+async def get_permission_context(current_user: WikiUser = Depends(get_current_user)):
+    """역할 정의와 인증 사용자의 전역 행동 권한을 반환한다."""
+    context = permission_context(current_user)
+    with Session(engine) as session:
+        context['category_permissions'] = {
+            category.name: can_write_category(current_user, category, lambda name: session.get(WikiCategory, name))
+            for category in session.exec(select(WikiCategory)).all()
+        }
+    return context
 
 @router.post('/register/verify-email')
 @limiter.limit('3/minute')
@@ -64,7 +101,9 @@ async def request_register_email_verification(request: Request, body: RegisterEm
         if session.exec(select(WikiUser).where(WikiUser.email == body.email)).first():
             raise HTTPException(status_code=409, detail='Email already in use.')
 
-    if not send_email_verification(body.username, body.email):
+    sent = (send_email_verification(body.username, body.email, body.registration_secret)
+            if body.registration_secret else send_email_verification(body.username, body.email))
+    if not sent:
         raise HTTPException(status_code=429, detail=EMAIL_THROTTLED_DETAIL)
     logger.info('signup verification email sent: %s', body.email)
     return {'message': 'A verification link has been sent to your email address.'}
@@ -78,15 +117,16 @@ async def register_verify_status(body: RegisterEmailRequest):
     Returns: `{'verified': True|False}`
     """
     with Session(engine) as session:
-        ev = session.exec(
+        records = session.exec(
             select(EmailVerification)
             .where(
                 EmailVerification.username == body.username,
                 EmailVerification.email == body.email,
                 EmailVerification.verified == True,
             )
-        ).first()
-        if ev and not (ev.expires_at and ev.expires_at < datetime.utcnow()):
+        ).all()
+        if any(matches_registration_secret(ev.token, body.registration_secret) and
+               not (ev.expires_at and ev.expires_at < datetime.utcnow()) for ev in records):
             return {'verified': True}
         return {'verified': False}
 
@@ -123,15 +163,16 @@ async def register_user(request: Request, user_info: UserRegisterForm):
             raise HTTPException(status_code=400, detail='Verification token does not match the submitted registration data.')
     else:
         with Session(engine) as session:
-            ev = session.exec(
+            records = session.exec(
                 select(EmailVerification)
                 .where(
                     EmailVerification.username == user_info.username,
                     EmailVerification.email == user_info.email,
                     EmailVerification.verified == True,
                 )
-            ).first()
-            if not ev or (ev.expires_at and ev.expires_at < datetime.utcnow()):
+            ).all()
+            if not any(matches_registration_secret(ev.token, user_info.registration_secret) and
+                       not (ev.expires_at and ev.expires_at < datetime.utcnow()) for ev in records):
                 raise HTTPException(status_code=400, detail='Email not verified yet. Please verify your email via the link sent.')
 
     with Session(engine) as session:
@@ -150,7 +191,7 @@ async def register_user(request: Request, user_info: UserRegisterForm):
         user = WikiUser(
             username=user_info.username,
             password=hash_password(user_info.password),
-            permission='login_user',
+            permission=Role.LOGIN_USER.value,
             bio='',
             email=user_info.email,
             email_verified=True,
@@ -196,9 +237,9 @@ async def get_user_info(username: str, current_user: WikiUser = Depends(get_curr
             .order_by(WikiDocVersion.updated_at.desc())
         ).all()
         if current_user is None or current_user.username != username:
-            user_data = user.model_dump(exclude={'password', 'email', 'totp_secret'})
+            user_data = user.model_dump(include={'username', 'permission', 'nickname', 'bio', 'github_url'})
         else:
-            user_data = user.model_dump(exclude={'password', 'totp_secret'})
+            user_data = user.model_dump(include={'username', 'permission', 'nickname', 'bio', 'github_url', 'email', 'email_verified', 'totp_enabled'})
         user_data['edit_versions'] = edit_versions
         return user_data
 
@@ -210,14 +251,13 @@ async def list_users(current_user: WikiUser = Depends(get_current_user)):
     Returns:
         list[dict]: 각 사용자에 대해 `username`, `permission`, `bio`, `email`, `email_verified`를 반환.
     """
-    if current_user is None or current_user.permission != 'admin':
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Admin permission required.')
+    require_action(current_user, Action.ADMIN)
 
     with Session(engine) as session:
         users = session.exec(select(WikiUser)).all()
         result = []
         for u in users:
-            data = u.model_dump(exclude={'password', 'totp_secret', 'totp_enabled', 'totp_last_step'})
+            data = u.model_dump(include={'username', 'permission', 'nickname', 'bio', 'github_url', 'email', 'email_verified'})
             result.append(data)
         return result
 
@@ -228,10 +268,9 @@ async def list_user_permissions(current_user: WikiUser = Depends(get_current_use
     Returns:
         dict: `{'permissions': ['admin', 'club_member', 'login_user']}`
     """
-    if current_user is None or current_user.permission != 'admin':
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Admin permission required.')
+    require_action(current_user, Action.ADMIN)
 
-    return {'permissions': ALLOWED_USER_PERMISSIONS}
+    return {'permissions': ALLOWED_USER_PERMISSIONS, 'roles': permission_context(current_user)['roles']}
 
 
 @router.put('/admin/users/{username}/permission')
@@ -246,11 +285,12 @@ async def update_user_permission(username: str, body: PermissionUpdate, current_
     Returns:
         dict: `{'username': ..., 'permission': ...}`
     """
-    if current_user is None or current_user.permission != 'admin':
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Admin permission required.')
+    require_action(current_user, Action.ADMIN)
 
     if body.permission not in ALLOWED_USER_PERMISSIONS:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Unsupported permission value.')
+    if username == current_user.username:
+        raise HTTPException(status_code=403, detail='Cannot change your own permission.')
 
     with Session(engine) as session:
         user = session.get(WikiUser, username)
@@ -369,9 +409,9 @@ async def login_user(request: Request, user_info: UserIdAndPassword):
 
         if user.totp_enabled:
             logger.info('login step 1 ok, awaiting 2fa: %s', user_info.username)
-            return {'mfa_required': True, 'mfa_token': create_mfa_token(user_info.username)}
+            return {'mfa_required': True, 'mfa_token': create_mfa_token(user_info.username, user.session_version)}
 
-        token = create_jwt_token(user_info.username)
+        token = create_jwt_token(user_info.username, user.session_version)
         logger.info('login success: %s', user_info.username)
         return {'token': token}
 
@@ -399,6 +439,7 @@ async def login_verify_2fa(request: Request, mfa_in: TotpLogin):
         user = session.get(WikiUser, username)
         if not user:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='User not found')
+        verify_mfa_token(mfa_in.mfa_token, session_version=user.session_version)
         if not user.totp_enabled or not user.totp_secret:
             raise HTTPException(status_code=400, detail='Two-factor authentication is not enabled for this account.')
         step = matched_totp_step(user.totp_secret, mfa_in.code)
@@ -409,7 +450,7 @@ async def login_verify_2fa(request: Request, mfa_in: TotpLogin):
         user.totp_last_step = step
         session.add(user)
         session.commit()
-        token = create_jwt_token(username)
+        token = create_jwt_token(username, user.session_version)
         logger.info('2fa login success: %s', username)
         return {'token': token}
 
@@ -471,6 +512,7 @@ async def confirm_password_reset(request: Request, confirm_in: PasswordResetConf
         verify_password_reset_token(confirm_in.token, user.password)
 
         user.password = hash_password(confirm_in.new_password)
+        user.session_version += 1
         session.add(user)
         session.commit()
         logger.info('password reset completed: %s', user.username)
@@ -507,7 +549,8 @@ async def setup_2fa(current_user: WikiUser = Depends(get_current_user)):
         return {'secret': secret, 'otpauth_uri': totp_provisioning_uri(secret, user.username)}
 
 @router.post('/2fa/enable')
-async def enable_2fa(body: TotpCode, current_user: WikiUser = Depends(get_current_user)):
+@limiter.limit('5/minute')
+async def enable_2fa(request: Request, body: TotpCode, current_user: WikiUser = Depends(get_current_user)):
     """`/2fa/setup`으로 받은 시크릿을 코드로 확인하고 2FA를 활성화한다. (로그인 필요)
 
     Args:
@@ -542,7 +585,8 @@ async def enable_2fa(body: TotpCode, current_user: WikiUser = Depends(get_curren
         return {'message': 'Two-factor authentication has been enabled.'}
 
 @router.post('/2fa/disable')
-async def disable_2fa(body: TotpCode, current_user: WikiUser = Depends(get_current_user)):
+@limiter.limit('5/minute')
+async def disable_2fa(request: Request, body: TotpCode, current_user: WikiUser = Depends(get_current_user)):
     """현재 코드를 확인하고 2FA를 비활성화한다. (로그인 필요)
 
     소유 증명을 위해 유효한 인증 코드를 요구한다. 성공 시 시크릿도 함께 제거한다.
@@ -676,8 +720,7 @@ async def send_test_email(request: Request, body: EmailUpdate, current_user: Wik
         HTTPException 429: 분당 요청 한도 초과, 또는 같은 주소 쿨다운·일일 발송 상한.
         HTTPException 502: provider가 발송을 거부했거나 연결에 실패했을 때.
     """
-    if current_user is None or current_user.permission != 'admin':
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Admin permission required.')
+    require_action(current_user, Action.ADMIN)
     validate_email(body.email)
     if not reserve_email_slot(body.email, 'test'):
         raise HTTPException(status_code=429, detail=EMAIL_THROTTLED_DETAIL)

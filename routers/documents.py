@@ -12,6 +12,8 @@ from core.deps import check_category_write_permission, check_document_permission
 from schemas.permissions import Permissions
 from schemas.wiki_doc import WikiDocMove, WikiDoc, WikiDocCreate, WikiDocUpdate, WikiDocVersion
 from schemas.wiki_user import WikiUser
+from schemas.categories import WikiCategory
+from core.permissions import Action, Role, require_action, can_perform_document, category_name
 
 router = APIRouter()
 
@@ -77,8 +79,8 @@ async def create_document(doc_in: WikiDocCreate, current_user: WikiUser = Depend
     """새 위키 문서를 생성한다. (로그인 필요)
 
     문서 본체와 함께 버전 1(WikiDocVersion)과 기본 문서 권한(Permissions)을 한 트랜잭션에
-    생성한다. created_by에는 생성자 username이 기록되며, 이후 작성자 삭제 권한의 근거가 된다.
-    기본 권한은 update=admin·club_member·login_user, move/delete=admin.
+    생성한다. created_by에는 생성자 username을 기록한다.
+    기본 최소 권한은 update=club_member, rename=club_member, move/delete=admin.
 
     Args:
         doc_in: 생성할 문서(title, content, category, tags).
@@ -91,8 +93,7 @@ async def create_document(doc_in: WikiDocCreate, current_user: WikiUser = Depend
         HTTPException 401: 비로그인 상태.
         HTTPException 400: 같은 제목의 문서가 이미 있거나, 참조 태그·카테고리가 없을 때.
     """
-    if current_user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Login required to create a document.')
+    require_action(current_user, Action.DOCUMENT_CREATE, anonymous_status=401)
     with Session(engine) as session:
         if session.get(WikiDoc, doc_in.title):
             raise HTTPException(status_code=400, detail='There is already a document with the same name.')
@@ -122,9 +123,10 @@ async def create_document(doc_in: WikiDocCreate, current_user: WikiUser = Depend
         session.add(doc)
         default_permissions = Permissions(
             wiki_doc_title=doc.title,
-            update=['admin', 'club_member', 'login_user'],
-            move=['admin'],
-            delete=['admin']
+            update=[Role.CLUB_MEMBER.value],
+            move=[Role.ADMIN.value],
+            rename=[Role.CLUB_MEMBER.value],
+            delete=[Role.ADMIN.value]
         )
         session.add(default_permissions)
         session.commit()
@@ -164,6 +166,18 @@ async def move_document_by_title(
     current_user: WikiUser = Depends(get_current_user),
 ):
     return await move_document(title, move_data, current_user)
+
+
+@router.get('/documents/by-title/permissions')
+async def get_document_permissions(title: str, current_user: WikiUser = Depends(get_current_user)):
+    with Session(engine) as session:
+        document = session.get(WikiDoc, title)
+        if document is None:
+            raise HTTPException(status_code=404, detail='Cannot find document')
+        permissions = session.get(Permissions, title)
+        category = session.get(WikiCategory, category_name(document.category))
+        return {action.value: can_perform_document(current_user, action, document, permissions, category, lambda name: session.get(WikiCategory, name))
+                for action in (Action.DOCUMENT_UPDATE, Action.DOCUMENT_RENAME, Action.DOCUMENT_MOVE, Action.DOCUMENT_DELETE)}
 
 
 @router.get('/documents/by-title/versions')
@@ -288,7 +302,7 @@ async def update_document(title: str, update_data: WikiDocUpdate, current_user: 
 
 @router.put('/documents/{title}/move')
 async def move_document(title: str, move_data: WikiDocMove, current_user: WikiUser = Depends(get_current_user)):
-    """문서 제목을 변경한다. (문서별 `move` 권한 필요)
+    """문서 제목을 변경한다. (동아리 회원 이상 + 문서별 `rename` + 카테고리 작성 권한)
 
     문서 PK가 제목이므로 이동은 실제로 제목을 새 값으로 바꾸는 rename 처리다.
     WikiDoc.title 변경에 따라 WikiDocVersion.wiki_doc_title도 함께 갱신하고,
@@ -305,7 +319,7 @@ async def move_document(title: str, move_data: WikiDocMove, current_user: WikiUs
     Raises:
         HTTPException 400: 새 제목이 비었거나, 같은 이름의 문서가 이미 있을 때.
         HTTPException 404: 대상 문서가 없을 때.
-        HTTPException 403: 문서별 `move` 권한이 없을 때.
+        HTTPException 403: 제목 변경 정책 또는 문서별 `rename` 또는 카테고리 작성 권한이 없을 때.
     """
     new_title = move_data.title.strip()
     if not new_title:
@@ -317,7 +331,7 @@ async def move_document(title: str, move_data: WikiDocMove, current_user: WikiUs
         if not (doc := session.get(WikiDoc, title)):
             raise HTTPException(status_code=404, detail='Cannot find document to move')
 
-        check_document_permission(session, current_user, title, 'move')
+        check_document_permission(session, current_user, title, 'rename')
 
         if session.get(WikiDoc, new_title):
             raise HTTPException(status_code=400, detail='There is already a document with the same name.')
@@ -351,6 +365,7 @@ async def move_document(title: str, move_data: WikiDocMove, current_user: WikiUs
                 wiki_doc_title=new_title,
                 update=doc.permissions.update,
                 move=doc.permissions.move,
+                rename=doc.permissions.rename,
                 delete=doc.permissions.delete,
             ))
 
@@ -362,35 +377,30 @@ async def move_document(title: str, move_data: WikiDocMove, current_user: WikiUs
 
 @router.delete('/documents/{title}')
 async def delete_document(title: str, current_user: WikiUser = Depends(get_current_user)):
-    """문서를 삭제한다. (작성자 본인 또는 문서별 `delete` 권한)
+    """문서를 삭제한다. (관리자 전용)
 
-    작성자 본인(current_user.username == doc.created_by)이면 권한 검사 없이 삭제할 수
-    있다. 이 예외는 삭제에만 적용되며 update/move 등 다른 동작에는 적용되지 않는다.
-    작성자가 아니면 문서별 `delete` 권한을 검사한다. 문서 삭제 시 연결된
-    버전·권한 레코드도 cascade로 함께 제거된다.
+    실제 admin 역할만 삭제할 수 있다. 작성자 예외는 없다.
+    문서 삭제 시 연결된 버전·권한 레코드도 cascade로 함께 제거된다.
 
     Args:
         title: 삭제할 문서 제목.
-        current_user: 인증 사용자(작성자 판별 및 권한 검사에 사용).
+        current_user: 인증 사용자(관리자 권한 검사에 사용).
 
     Returns:
         dict: `{'message': '...has been deleted.'}`
 
     Raises:
         HTTPException 404: 대상 문서가 없을 때.
-        HTTPException 403: 작성자가 아니고 문서별 `delete` 권한도 없을 때.
+        HTTPException 403: 관리자가 아닐 때.
     """
     with Session(engine) as session:
         if not (doc := session.get(WikiDoc, title)):
             raise HTTPException(status_code=404, detail='Cannot find document to delete')
 
-        is_creator = (
-            current_user is not None
-            and doc.created_by is not None
-            and doc.created_by == current_user.username
-        )
-        if not is_creator:
-            check_document_permission(session, current_user, title, 'delete')
+        permissions = session.get(Permissions, title)
+        category = session.get(WikiCategory, category_name(doc.category))
+        if not can_perform_document(current_user, Action.DOCUMENT_DELETE, doc, permissions, category, lambda name: session.get(WikiCategory, name)):
+            raise HTTPException(status_code=403, detail='Document delete permission required.')
 
         session.delete(doc)
         session.commit()

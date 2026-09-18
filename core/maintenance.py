@@ -19,6 +19,7 @@ from core.config import (
     SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD,
 )
 from core.database import engine
+from core.permissions import Role, is_admin
 from core.login_utils import (
     EMAIL_VERIFY_EXPIRE_MINUTES, PASSWORD_RESET_EXPIRE_MINUTES,
     create_email_verification_token, hash_password,
@@ -258,7 +259,7 @@ def render_email_html(title: str, message: str, button_label: str, link: str, no
 </html>'''
 
 
-def send_email_verification(username: str, email: str) -> bool:
+def send_email_verification(username: str, email: str, registration_secret: str | None = None) -> bool:
     """해당 이메일로 인증 링크를 발송하고 EmailVerification 레코드를 남긴다.
 
     Args:
@@ -270,7 +271,7 @@ def send_email_verification(username: str, email: str) -> bool:
     """
     if not reserve_email_slot(email, 'verify'):
         return False
-    token = create_email_verification_token(username, email)
+    token = create_email_verification_token(username, email, registration_secret)
     expires = datetime.utcnow() + timedelta(minutes=EMAIL_VERIFY_EXPIRE_MINUTES)
     ev = EmailVerification(
         username=username,
@@ -404,8 +405,8 @@ def bootstrap_admin():
     with Session(engine) as session:
         user = session.get(WikiUser, admin_username)
         if user:
-            if user.permission != 'admin':
-                user.permission = 'admin'
+            if not is_admin(user):
+                user.permission = Role.ADMIN.value
                 session.add(user)
                 session.commit()
                 logger.info('admin bootstrap: promoted existing user to admin: %s', admin_username)
@@ -413,7 +414,7 @@ def bootstrap_admin():
             user = WikiUser(
                 username=admin_username,
                 password=hash_password(admin_password),
-                permission='admin',
+                permission=Role.ADMIN.value,
                 bio='',
                 email=None,
             )

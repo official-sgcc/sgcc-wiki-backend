@@ -197,14 +197,23 @@ docker run --rm -it \
 
 ### 권한
 
-- `admin` — 모든 작업
-- `club_member` — 문서별 권한 설정에 따름
-- `login_user` — 일반 가입자 기본값
+- `admin` — 등급 100, 관리자 전용 행동 가능
+- `club_member` — 등급 50, 동아리 회원
+- `login_user` — 등급 10, 일반 가입자 기본값
 - 비로그인 — 조회만
 
-문서 생성·수정은 카테고리별 `write_permission` 최소 등급을 검사합니다. 기본값은 `club_member`이며 `admin`은 항상 등급 조건을 충족합니다. 관리자는 각 카테고리에서 `admin` / `club_member` / `login_user` 중 최소 등급을 설정할 수 있습니다. 각 노드는 독립 설정이며 부모 설정을 상속하지 않습니다. 기존 카테고리는 서버 시작 시 신규 컬럼과 기본값을 자동으로 보완하며, 기존 문서에도 즉시 적용합니다. 카테고리 이동 시 원래 카테고리와 대상 카테고리 모두 작성 권한을 확인합니다.
+문서 생성·수정은 카테고리별 `write_permission` 최소 등급을 검사합니다. 기본값은 `club_member`이며 `admin`은 항상 등급 조건을 충족합니다. 관리자는 각 카테고리에서 `admin` / `club_member` / `login_user` 중 최소 등급을 설정할 수 있습니다. 모든 조상의 최소 권한을 하한으로 상속합니다. 실제 제한은 자신과 조상 중 가장 높은 제한이며, 관리자는 이 제한을 우회합니다. 부모 변경·권한 상향은 기존 하위 문서에도 즉시 적용되고, 부모보다 낮은 권한 저장 요청은 거부됩니다. 기존 카테고리는 서버 시작 시 신규 컬럼과 기본값을 자동으로 보완하며, 기존 문서에도 즉시 적용합니다. 카테고리 이동 시 원래 카테고리와 대상 카테고리 모두 작성 권한을 확인합니다.
 
-문서 수정·이동·삭제는 추가로 **문서별 권한**(`Permissions` 테이블)으로 결정됩니다. 문서 생성 시 기본값은 `update` = 로그인 사용자 전체, `move`/`delete` = admin입니다. 단, **문서 작성자**는 자기 문서를 권한 설정과 무관하게 삭제할 수 있습니다. 태그 삭제와 카테고리 수정·삭제는 admin 전용입니다.
+공통 정책은 `core/permissions.py`의 `Role`, `Action`, `MINIMUM_ROLES`에 있습니다. 일반 행동은 최소 등급 이상이면 통과하며, 관리자 전용 행동과 관리자 전용 카테고리는 등급과 별개로 `is_admin`을 통해 실제 `admin` 역할을 확인합니다. 새 역할은 `Role` Enum에 `(저장할 이름, 등급, 표시 이름)`을 추가하면 역할 목록·최소 등급 검사·관리자 선택 목록에 반영됩니다. 알 수 없는 역할이나 정책은 거부합니다.
+
+문서별 `Permissions` 목록을 공통 등급 검사와 함께 적용합니다. 수정은 전역 최소 등급 `club_member`, 문서별 목록의 최소 등급, 카테고리 상속 제한을 모두 통과해야 합니다. 제목 변경은 `rename`과 `update`를 검사합니다. 카테고리 이동·삭제는 실제 관리자만 가능하며 작성자 삭제 예외는 없습니다. 관리자는 권한 검사에서 우선 통과합니다. 신규 문서는 update/rename = ['club_member'], move/delete = ['admin']으로 저장합니다. 기존 DB의 목록은 덮어쓰지 않습니다. 기존 목록에 login_user가 있어도 전역 하한이 적용됩니다. 카테고리 생성·수정·삭제와 태그 삭제는 관리자 전용이며 태그 생성은 문서 저장 트랜잭션에서만 가능합니다.
+
+
+`GET /permissions`는 역할 정의·현재 사용자의 전역 행동·카테고리 작성 권한을 반환합니다. `GET /documents/by-title/permissions?title=...`는 해당 문서의 `document_update` / `document_rename` / `document_move` / `document_delete` 가능 여부를 반환하며 조회수를 올리지 않습니다. 프론트는 서버 결과로 UI를 제어하고, 실제 API도 같은 정책을 다시 검사합니다.
+
+문서 이력·diff는 문서와 동급의 열람 정책을 적용하며 현재 모두 공개입니다. 프론트의 카테고리 선택은 `document_move`가 허용될 때만 활성화됩니다.
+
+`POST /logout`은 현재 액세스 토큰의 SHA-256 해시와 만료 시각을 `revokedtoken` 테이블에 저장합니다. 이후 모든 인증 요청에서 폐기 여부를 확인하므로 서버 재시작 후에도 차단됩니다. 다른 로그인 토큰은 유지되며, 신규 액세스 토큰은 고유 `jti`를 포함합니다. 만료된 폐기 기록은 로그아웃 요청 시 정리합니다. 프론트는 서버 처리 성공(또는 이미 무효한 토큰의 401) 후 로컬 토큰을 삭제하고, 통신 실패는 사용자에게 알립니다. 신규 테이블은 서버 시작 시 자동 생성됩니다.
 
 ### 입력 정책
 
@@ -224,7 +233,7 @@ IP 기준이며 초과 시 `429`입니다.
 
 ## API
 
-인증 열: `-` 불필요 / `필요` 로그인 / `문서권한` 문서별 권한 / `admin` 관리자.
+인증 열: `-` 불필요 / `필요` 로그인 / `카테고리 작성권한` 자신과 조상의 최소 권한 / `admin` 관리자.
 목록 조회는 공통으로 `limit`(미지정 시 전체)·`offset`(기본 0)을 받으며, **`offset`은 `limit`이 있을 때만 적용**됩니다.
 
 ### 문서
@@ -235,9 +244,9 @@ IP 기준이며 초과 시 `429`입니다.
 | `POST /documents` | 필요 | 문서 생성. 바디: `title`, `content`, `category`, `tags` |
 | `GET /documents/count` | - | 총 문서 수 |
 | `GET /documents/{title}` | - | 문서 단건 조회 (호출 시 `view_count` 증가) |
-| `PUT /documents/{title}` | 문서권한 `update` | `content`/`category`/`tags` 중 보낸 필드만 수정, 새 버전 생성 |
-| `PUT /documents/{title}/move` | 문서권한 `move` | 바디: `new_title`로 새 제목으로 이동 |
-| `DELETE /documents/{title}` | 작성자 또는 문서권한 `delete` | 문서 + 버전 + 권한 레코드 삭제 |
+| `PUT /documents/{title}` | 카테고리 작성권한 | `content`/`category`/`tags` 중 보낸 필드만 수정, 새 버전 생성 |
+| `PUT /documents/{title}/move` | 동아리 회원 이상 + 카테고리 작성권한 | 바디: `new_title`로 제목 변경 |
+| `DELETE /documents/{title}` | admin | 문서 + 버전 + 권한 레코드 삭제 |
 | `GET /documents/{title}/versions` | - | 버전 목록 |
 | `GET /documents/{title}/versions/{n}` | - | 특정 버전 |
 | `GET /documents/{title}/diff/{n}` | - | `n`번 버전과 직전 버전의 본문 diff. `(op, text)` 목록(op: -1 삭제 / 0 유지 / 1 추가). `n <= 1`이면 400 |
@@ -281,7 +290,6 @@ IP 기준이며 초과 시 `429`입니다.
 | 엔드포인트 | 인증 | 설명 |
 |---|---|---|
 | `GET /tags` | - | 태그 전체 목록 |
-| `POST /tags` | 필요 | 바디: `name` |
 | `GET /tags/{name}/documents` | - | 해당 태그가 달린 문서 목록(태그명 정확 일치). 태그가 없으면 404 |
 | `DELETE /tags/{name}` | admin | 삭제 시 이 태그를 쓰던 모든 문서에서도 함께 제거 |
 
@@ -290,7 +298,7 @@ IP 기준이며 초과 시 `429`입니다.
 | 엔드포인트 | 인증 | 설명 |
 |---|---|---|
 | `GET /categories` | - | 카테고리 트리(루트부터 `children` 중첩) |
-| `POST /categories` | 필요 | 바디: `name`, `parent`(선택) |
+| `POST /categories` | admin | 바디: `name`, `parent`(선택) |
 | `GET /categories/{name}` | - | 해당 카테고리 노드. `children`은 **하위 카테고리**이며 문서가 아님 |
 | `GET /categories/{name}/documents` | - | 카테고리에 속한 **문서** 목록. `recursive=true`면 하위 카테고리 문서까지 포함 |
 | `PUT /categories/{name}` | admin | 바디: `parent`. 자기 하위 노드를 부모로 지정하는 순환 참조는 거부 |
@@ -362,6 +370,26 @@ stdout과 `logs/app.log`에 동시 출력하며, 5MB마다 회전해 최대 5개
 
 ### 스키마 마이그레이션
 
+#### 비밀번호 재설정 시 세션 무효화
+
+서버 시작 시 `wikiuser.session_version`이 없으면 자동으로 추가하며 기존 사용자에는 0을 적용합니다. 비밀번호 재설정이 성공하면 값을 증가시켜 기존 액세스 토큰과 로그인 대기 중인 MFA 토큰을 거부합니다. 기존 버전 정보가 없는 액세스 토큰은 버전 0으로 취급하므로 배포만으로 로그아웃되지는 않습니다. 재시작은 저장된 버전을 덮어쓰지 않습니다. 수동 적용 시 컬럼이 없는 경우에만 실행하세요.
+
+```sql
+ALTER TABLE wikiuser ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0;
+```
+
+가입 화면은 이메일 발송 요청 시 생성한 임의의 `registration_secret`을 인증 상태 조회와 최종 가입에 동일하게 전달해야 합니다. 이메일 인증 완료 여부만으로는 가입할 수 없습니다. 이메일 링크의 `verification_token`을 직접 제출하는 방식은 유지합니다. 프론트와 백엔드를 함께 배포하고, 배포 전에 열어 둔 가입 화면은 새로고침 후 인증을 다시 요청해야 합니다.
+
+권한 점검 결과와 유지한 정책은 [AUTHORIZATION_AUDIT.md](AUTHORIZATION_AUDIT.md)를 참고하세요.
+
+#### 제목 변경 권한 분리
+
+서버 시작 시 `permissions.rename`이 없으면 자동으로 추가합니다. 호환용 컬럼으로, 실제 제목 변경 권한은 공통 정책과 카테고리에서 판정합니다. 기존 `update` / `move` / `delete`와 문서·버전 데이터는 유지합니다. 이후 재시작에서는 저장된 `rename` 설정을 덮어쓰지 않습니다. 수동 적용 시 컬럼이 없는 경우에만 실행하세요.
+
+```sql
+ALTER TABLE permissions ADD COLUMN rename JSON NOT NULL DEFAULT '["club_member"]';
+```
+
 #### 카테고리 작성 권한
 
 서버 시작 시 `core/database.py`가 기존 카테고리 테이블에 다음 컬럼을 자동 추가합니다. 이미 컬럼이 있으면 저장된 관리자 설정을 유지합니다. 기존 행에도 `club_member` 기본값이 적용됩니다. 수동 적용 시 컬럼이 없는 경우에만 실행하세요.
@@ -401,22 +429,9 @@ ALTER TABLE wikiuser ADD COLUMN totp_last_step INTEGER;
 ALTER TABLE wikiuser ADD COLUMN email_verified BOOLEAN NOT NULL DEFAULT 0;
 ```
 
-#### `comment` 권한 컬럼 제거
-기존 DB에 `permissions.comment` 컬럼이 남아 있으면 아래처럼 정리합니다.
+#### 코멘트 권한
 
-```sql
-ALTER TABLE permissions RENAME TO permissions_legacy;
-CREATE TABLE permissions (
-    wiki_doc_title VARCHAR NOT NULL PRIMARY KEY,
-    update JSON NOT NULL,
-    move JSON NOT NULL,
-    delete JSON NOT NULL,
-    FOREIGN KEY (wiki_doc_title) REFERENCES wikidoc(title)
-);
-INSERT INTO permissions (wiki_doc_title, update, move, delete)
-SELECT wiki_doc_title, update, move, delete FROM permissions_legacy;
-DROP TABLE permissions_legacy;
-```
+코멘트 기능과 권한 필드는 현재 구현하지 않습니다. 운영 DB에도 comment 컬럼이 없음을 확인했으며 사용자 요청에 따라 추가하지 않습니다.
 
 #### 아주 오래된 DB의 `email` NOT NULL 제거 (이메일 선택 등록 도입 시)
 
