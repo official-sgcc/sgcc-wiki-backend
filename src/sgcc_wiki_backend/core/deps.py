@@ -2,12 +2,12 @@
 
 from fastapi import Header, HTTPException, status
 from sqlmodel import Session
-from core.database import engine
-from core.login_utils import verify_jwt_token
-from schemas.categories import WikiCategory
-from schemas.permissions import Permissions
-from schemas.tags import WikiTag
-from schemas.wiki_user import WikiUser
+from .database import engine
+from .login_utils import verify_jwt_token
+from sgcc_wiki_backend.schemas.categories import WikiCategory
+from sgcc_wiki_backend.schemas.permissions import Permissions
+from sgcc_wiki_backend.schemas.tags import WikiTag
+from sgcc_wiki_backend.schemas.wiki_user import WikiUser
 
 async def get_current_user(
     auth: str | None = Header(None),

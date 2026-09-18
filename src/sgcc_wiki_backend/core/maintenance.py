@@ -13,17 +13,17 @@ from html import escape as html_escape
 from uuid import uuid4
 import httpx
 from sqlmodel import Session
-from core.config import (
+from .config import (
     BACKUP_DIR, DB_PATH, FRONTEND_URL, logger,
     EMAIL_PROVIDER, EMAIL_FROM, EMAIL_DAILY_LIMIT, EMAIL_COOLDOWN_SECONDS, RESEND_API_KEY,
     SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD,
 )
-from core.database import engine
-from core.login_utils import (
+from .database import engine
+from .login_utils import (
     EMAIL_VERIFY_EXPIRE_MINUTES, PASSWORD_RESET_EXPIRE_MINUTES,
     create_email_verification_token, hash_password,
 )
-from schemas.wiki_user import WikiUser, EmailVerification
+from sgcc_wiki_backend.schemas.wiki_user import WikiUser, EmailVerification
 
 RESEND_API_URL = 'https://api.resend.com/emails'
 EMAIL_SEND_TIMEOUT_SECONDS = 10

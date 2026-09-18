@@ -10,9 +10,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from core.config import FRONTEND_URL, limiter
-from core.maintenance import backup_database, bootstrap_admin
-from routers import categories, documents, health, tags, users
+from .core.config import FRONTEND_URL, limiter
+from .core.maintenance import backup_database, bootstrap_admin
+from .routers import categories, documents, health, tags, users
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
