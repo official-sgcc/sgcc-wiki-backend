@@ -44,6 +44,11 @@ def migrate_legacy_schema() -> None:
                 'ALTER TABLE wikidoc '
                 'ADD COLUMN view_count INTEGER NOT NULL DEFAULT 0'
             )
+        if 'is_private' not in document_columns:
+            connection.exec_driver_sql(
+                'ALTER TABLE wikidoc '
+                'ADD COLUMN is_private BOOLEAN NOT NULL DEFAULT 0'
+            )
 
         user_columns = {
             row[1]

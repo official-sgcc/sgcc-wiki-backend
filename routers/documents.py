@@ -8,18 +8,18 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 from core.config import logger
 from core.database import engine
-from core.deps import check_category_write_permission, check_document_permission, get_current_user, validate_tags_and_category
+from core.deps import check_category_write_permission, check_document_permission, check_document_read_permission, get_current_user, validate_tags_and_category
 from schemas.permissions import Permissions
 from schemas.wiki_doc import WikiDocMove, WikiDoc, WikiDocCreate, WikiDocUpdate, WikiDocVersion
 from schemas.wiki_user import WikiUser
 from schemas.categories import WikiCategory
-from core.permissions import Action, Role, require_action, can_perform_document, category_name
+from core.permissions import Action, Role, require_action, can_perform_document, category_name, is_admin
 
 router = APIRouter()
 
 
 @router.get('/documents')
-async def get_documents(keyword: str | None = None, limit: int | None = None, offset: int = 0):
+async def get_documents(keyword: str | None = None, limit: int | None = None, offset: int = 0, current_user: WikiUser = Depends(get_current_user)):
     """문서 목록을 조회한다. (인증 불필요)
 
     Args:
@@ -39,13 +39,15 @@ async def get_documents(keyword: str | None = None, limit: int | None = None, of
             )
         else:
             statement = select(WikiDoc)
+        if not is_admin(current_user):
+            statement = statement.where(WikiDoc.is_private == False)
         if limit is not None:
             statement = statement.offset(offset).limit(limit)
         return session.exec(statement).all()
 
 
 @router.get('/documents/count')
-async def get_documents_count(category: str | None = None, tag: str | None = None):
+async def get_documents_count(category: str | None = None, tag: str | None = None, current_user: WikiUser = Depends(get_current_user)):
     """총 문서 개수를 반환한다. (인증 불필요)
 
     Args:
@@ -58,6 +60,8 @@ async def get_documents_count(category: str | None = None, tag: str | None = Non
     with Session(engine) as session:
         if category is not None or tag is not None:
             statement = select(WikiDoc)
+            if not is_admin(current_user):
+                statement = statement.where(WikiDoc.is_private == False)
             if category is not None:
                 statement = statement.where(func.json_extract(WikiDoc.category, '$.name') == category)
             if tag is not None:
@@ -71,6 +75,8 @@ async def get_documents_count(category: str | None = None, tag: str | None = Non
             return {'count': len(docs)}
 
         statement = select(func.count(WikiDoc.title))
+        if not is_admin(current_user):
+            statement = statement.where(WikiDoc.is_private == False)
         total = session.exec(statement).one()
         return {'count': int(total)}
 
@@ -94,6 +100,8 @@ async def create_document(doc_in: WikiDocCreate, current_user: WikiUser = Depend
         HTTPException 400: 같은 제목의 문서가 이미 있거나, 참조 태그·카테고리가 없을 때.
     """
     require_action(current_user, Action.DOCUMENT_CREATE, anonymous_status=401)
+    if doc_in.is_private and not is_admin(current_user):
+        raise HTTPException(status_code=403, detail='Only administrators can create private documents.')
     with Session(engine) as session:
         if session.get(WikiDoc, doc_in.title):
             raise HTTPException(status_code=400, detail='There is already a document with the same name.')
@@ -138,8 +146,8 @@ async def create_document(doc_in: WikiDocCreate, current_user: WikiUser = Depend
 # 제목에 '/' 같은 경로 구분자가 포함되어도 안전하게 접근할 수 있도록
 # 기존 path parameter API와 동일한 동작을 query parameter API로도 제공한다.
 @router.get('/documents/by-title')
-async def get_document_by_title(title: str):
-    return await get_document(title)
+async def get_document_by_title(title: str, current_user: WikiUser = Depends(get_current_user)):
+    return await get_document(title, current_user)
 
 
 @router.put('/documents/by-title')
@@ -174,6 +182,7 @@ async def get_document_permissions(title: str, current_user: WikiUser = Depends(
         document = session.get(WikiDoc, title)
         if document is None:
             raise HTTPException(status_code=404, detail='Cannot find document')
+        check_document_read_permission(current_user, document)
         permissions = session.get(Permissions, title)
         category = session.get(WikiCategory, category_name(document.category))
         return {action.value: can_perform_document(current_user, action, document, permissions, category, lambda name: session.get(WikiCategory, name))
@@ -181,22 +190,22 @@ async def get_document_permissions(title: str, current_user: WikiUser = Depends(
 
 
 @router.get('/documents/by-title/versions')
-async def get_document_versions_by_title(title: str):
-    return await get_document_versions(title)
+async def get_document_versions_by_title(title: str, current_user: WikiUser = Depends(get_current_user)):
+    return await get_document_versions(title, current_user)
 
 
 @router.get('/documents/by-title/version')
-async def get_document_version_by_title(title: str, version_number: int):
-    return await get_document_version(title, version_number)
+async def get_document_version_by_title(title: str, version_number: int, current_user: WikiUser = Depends(get_current_user)):
+    return await get_document_version(title, version_number, current_user)
 
 
 @router.get('/documents/by-title/diff')
-async def get_document_update_diff_by_title(title: str, version_number: int):
-    return await get_document_update_diff(title, version_number)
+async def get_document_update_diff_by_title(title: str, version_number: int, current_user: WikiUser = Depends(get_current_user)):
+    return await get_document_update_diff(title, version_number, current_user)
 
 
 @router.get('/documents/{title}')
-async def get_document(title: str):
+async def get_document(title: str, current_user: WikiUser = Depends(get_current_user)):
     """제목으로 문서 하나를 조회한다. (인증 불필요)
 
     Args:
@@ -212,6 +221,7 @@ async def get_document(title: str):
         doc = session.get(WikiDoc, title)
         if not doc:
             raise HTTPException(status_code=404, detail='Cannot find a document with the corresponding name.')
+        check_document_read_permission(current_user, doc)
         doc.view_count = (doc.view_count or 0) + 1
         session.add(doc)
         session.commit()
@@ -247,6 +257,8 @@ async def update_document(title: str, update_data: WikiDocUpdate, current_user: 
             raise HTTPException(status_code=404, detail='Cannot find document to update')
 
         check_document_permission(session, current_user, title, 'update')
+        if update_data.is_private is not None and update_data.is_private != doc.is_private and not is_admin(current_user):
+            raise HTTPException(status_code=403, detail='Only administrators can change document privacy.')
         check_category_write_permission(session, current_user, doc.category)
         if update_data.category is not None:
             check_category_write_permission(session, current_user, update_data.category)
@@ -270,6 +282,9 @@ async def update_document(title: str, update_data: WikiDocUpdate, current_user: 
 
             if update_data.category is not None:
                 doc.category = (update_data.category.model_dump() if hasattr(update_data.category, 'model_dump') else update_data.category)
+
+            if update_data.is_private is not None:
+                doc.is_private = update_data.is_private
 
             doc.updated_at = datetime.now(timezone.utc)
 
@@ -341,6 +356,7 @@ async def move_document(title: str, move_data: WikiDocMove, current_user: WikiUs
             content=doc.content,
             category=doc.category,
             tags=doc.tags,
+            is_private=doc.is_private,
             view_count=(doc.view_count or 0),
             created_by=doc.created_by,
             updated_at=doc.updated_at,
@@ -408,7 +424,7 @@ async def delete_document(title: str, current_user: WikiUser = Depends(get_curre
         return {'message': f'The document named {title} has been deleted.'}
 
 @router.get('/search')
-async def search_documents(keyword: str, search_type: str = 'title', limit: int | None = None, offset: int = 0):
+async def search_documents(keyword: str, search_type: str = 'title', limit: int | None = None, offset: int = 0, current_user: WikiUser = Depends(get_current_user)):
     """문서를 검색한다. (인증 불필요)
 
     Args:
@@ -430,14 +446,15 @@ async def search_documents(keyword: str, search_type: str = 'title', limit: int 
     if not keyword:
         raise HTTPException(status_code=400, detail='Search keyword cannot be empty.')
     with Session(engine) as session:
+        visibility = [] if is_admin(current_user) else [WikiDoc.is_private == False]
         if search_type == 'title':
-            statement = select(WikiDoc).where(WikiDoc.title.contains(keyword))
+            statement = select(WikiDoc).where(WikiDoc.title.contains(keyword), *visibility)
         elif search_type == 'title_content':
             statement = select(WikiDoc).where(
-                WikiDoc.title.contains(keyword) | WikiDoc.content.contains(keyword)
+                WikiDoc.title.contains(keyword) | WikiDoc.content.contains(keyword), *visibility
             )
         elif search_type == 'tag':
-            statement = select(WikiDoc).where(WikiDoc.tags.contains(f'"{keyword}"'))
+            statement = select(WikiDoc).where(WikiDoc.tags.contains(f'"{keyword}"'), *visibility)
             docs = session.exec(statement).all()
             docs = [
                 d for d in docs
@@ -453,7 +470,7 @@ async def search_documents(keyword: str, search_type: str = 'title', limit: int 
         return session.exec(statement).all()
 
 @router.get('/documents/{title}/versions')
-async def get_document_versions(title: str):
+async def get_document_versions(title: str, current_user: WikiUser = Depends(get_current_user)):
     """문서의 전체 버전 이력을 조회한다. (인증 불필요)
 
     Args:
@@ -469,10 +486,11 @@ async def get_document_versions(title: str):
         doc = session.get(WikiDoc, title)
         if not doc:
             raise HTTPException(status_code=404, detail='Cannot find document with the corresponding name.')
+        check_document_read_permission(current_user, doc)
         return doc.versions
 
 @router.get('/documents/{title}/versions/{version_number}')
-async def get_document_version(title: str, version_number: int):
+async def get_document_version(title: str, version_number: int, current_user: WikiUser = Depends(get_current_user)):
     """문서의 특정 버전을 조회한다. (인증 불필요)
 
     Args:
@@ -489,10 +507,11 @@ async def get_document_version(title: str, version_number: int):
         version = session.get(WikiDocVersion, (title, version_number))
         if not version:
             raise HTTPException(status_code=404, detail='Cannot find the corresponding document version.')
+        check_document_read_permission(current_user, session.get(WikiDoc, title))
         return version
 
 @router.get('/documents/{title}/diff/{version_number}')
-async def get_document_update_diff(title: str, version_number: int):
+async def get_document_update_diff(title: str, version_number: int, current_user: WikiUser = Depends(get_current_user)):
     """지정 버전과 직전 버전(version_number - 1)의 본문 diff를 반환한다. (인증 불필요)
 
     diff-match-patch로 두 버전의 content를 비교한 뒤 diff_cleanupSemantic으로 사람이
@@ -517,6 +536,7 @@ async def get_document_update_diff(title: str, version_number: int):
         updated = session.get(WikiDocVersion, (title, version_number))
         if not original or not updated:
             raise HTTPException(status_code=404, detail='Cannot find the corresponding document versions.')
+        check_document_read_permission(current_user, session.get(WikiDoc, title))
         dmp = diff_match_patch()
         diffs = dmp.diff_main(original.content, updated.content)
         dmp.diff_cleanupSemantic(diffs)
