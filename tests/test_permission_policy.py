@@ -65,7 +65,7 @@ def test_document_capabilities_match_enforcement_and_rename_preserves_data(clien
     assert client.get('/permissions', headers=club).json()['category_permissions']['General'] is True
     assert client.get('/permissions', headers=regular).json()['category_permissions']['General'] is False
     caps = client.get('/documents/by-title/permissions', params={'title': 'Old/Title'}, headers=club).json()
-    assert caps == {'document_update': True, 'document_rename': True, 'document_move': False, 'document_delete': False}
+    assert caps == {'document_update': True, 'document_rename': True, 'document_move': False, 'document_delete': True}
     assert not any(client.get('/documents/by-title/permissions', params={'title': 'Old/Title'}, headers=regular).json().values())
     assert client.put('/documents/by-title/move', params={'title': 'Old/Title'}, json={'new_title': 'Denied'}, headers=regular).status_code == 403
     assert client.put('/documents/by-title', params={'title': 'Old/Title'}, json={'category': {'name': 'Other'}}, headers=club).status_code == 403

@@ -99,4 +99,4 @@ def test_parent_restriction_applies_to_existing_children(client, club_headers, a
     assert client.get('/permissions', headers=club).json()['category_permissions']['General'] is False
     assert client.put('/categories/General', json={'write_permission': 'club_member'}, headers=admin).status_code == 400
     assert client.put('/documents/Restricted', json={'content': 'admin'}, headers=admin).status_code == 200
-    assert client.delete('/documents/Restricted', headers=club).status_code == 403
+    assert client.delete('/documents/Restricted', headers=club).status_code == 200

@@ -206,7 +206,7 @@ docker run --rm -it \
 
 공통 정책은 `core/permissions.py`의 `Role`, `Action`, `MINIMUM_ROLES`에 있습니다. 일반 행동은 최소 등급 이상이면 통과하며, 관리자 전용 행동과 관리자 전용 카테고리는 등급과 별개로 `is_admin`을 통해 실제 `admin` 역할을 확인합니다. 새 역할은 `Role` Enum에 `(저장할 이름, 등급, 표시 이름)`을 추가하면 역할 목록·최소 등급 검사·관리자 선택 목록에 반영됩니다. 알 수 없는 역할이나 정책은 거부합니다.
 
-문서별 `Permissions` 목록을 공통 등급 검사와 함께 적용합니다. 수정은 전역 최소 등급 `club_member`, 문서별 목록의 최소 등급, 카테고리 상속 제한을 모두 통과해야 합니다. 제목 변경은 `rename`과 `update`를 검사합니다. 카테고리 이동·삭제는 실제 관리자만 가능하며 작성자 삭제 예외는 없습니다. 관리자는 권한 검사에서 우선 통과합니다. 신규 문서는 update/rename = ['club_member'], move/delete = ['admin']으로 저장합니다. 기존 DB의 목록은 덮어쓰지 않습니다. 기존 목록에 login_user가 있어도 전역 하한이 적용됩니다. 카테고리 생성·수정·삭제와 태그 삭제는 관리자 전용이며 태그 생성은 문서 저장 트랜잭션에서만 가능합니다.
+문서별 `Permissions` 목록을 공통 등급 검사와 함께 적용합니다. 수정은 전역 최소 등급 `club_member`, 문서별 목록의 최소 등급, 카테고리 상속 제한을 모두 통과해야 합니다. 제목 변경은 `rename`과 `update`를 검사합니다. 카테고리 이동은 실제 관리자만 가능합니다. 문서 삭제는 관리자 또는 작성자가 자기 문서를 삭제하는 경우에 허용합니다. 관리자는 권한 검사에서 우선 통과합니다. 신규 문서는 update/rename = ['club_member'], move/delete = ['admin']으로 저장합니다. 기존 DB의 목록은 덮어쓰지 않습니다. 기존 목록에 login_user가 있어도 전역 하한이 적용됩니다. 카테고리 생성·수정·삭제와 태그 삭제는 관리자 전용이며 태그 생성은 문서 저장 트랜잭션에서만 가능합니다.
 
 
 `GET /permissions`는 역할 정의·현재 사용자의 전역 행동·카테고리 작성 권한을 반환합니다. `GET /documents/by-title/permissions?title=...`는 해당 문서의 `document_update` / `document_rename` / `document_move` / `document_delete` 가능 여부를 반환하며 조회수를 올리지 않습니다. 프론트는 서버 결과로 UI를 제어하고, 실제 API도 같은 정책을 다시 검사합니다.
@@ -246,7 +246,7 @@ IP 기준이며 초과 시 `429`입니다.
 | `GET /documents/{title}` | - | 문서 단건 조회 (호출 시 `view_count` 증가) |
 | `PUT /documents/{title}` | 카테고리 작성권한 | `content`/`category`/`tags` 중 보낸 필드만 수정, 새 버전 생성 |
 | `PUT /documents/{title}/move` | 동아리 회원 이상 + 카테고리 작성권한 | 바디: `new_title`로 제목 변경 |
-| `DELETE /documents/{title}` | admin | 문서 + 버전 + 권한 레코드 삭제 |
+| `DELETE /documents/{title}` | admin 또는 작성자 | 문서 + 버전 + 권한 레코드 삭제 |
 | `GET /documents/{title}/versions` | - | 버전 목록 |
 | `GET /documents/{title}/versions/{n}` | - | 특정 버전 |
 | `GET /documents/{title}/diff/{n}` | - | `n`번 버전과 직전 버전의 본문 diff. `(op, text)` 목록(op: -1 삭제 / 0 유지 / 1 추가). `n <= 1`이면 400 |
