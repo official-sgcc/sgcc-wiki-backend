@@ -5,15 +5,15 @@ import pytest
 
 # 엔진·설정은 임포트 시점에 만들어지므로, 캐시된 채로 두면 임시 DB가 아니라
 # 실제 wiki.db를 쓰게 된다. schemas는 지우지 않는다(테이블 재등록 에러 방지).
-APP_MODULES = ('main', 'core', 'routers')
+APP_MODULES = ('main', 'core', 'routers', 'sgcc_wiki_backend.main', 'sgcc_wiki_backend.core', 'sgcc_wiki_backend.routers')
 
 
 def reload_app():
     """현재 환경변수로 앱 모듈 전체를 새로 임포트해 반환한다."""
     for name in list(sys.modules):
-        if name in APP_MODULES or name.startswith(('core.', 'routers.')):
+        if name in APP_MODULES or name.startswith(('core.', 'routers.', 'sgcc_wiki_backend.core.', 'sgcc_wiki_backend.routers.')):
             del sys.modules[name]
-    import main
+    import sgcc_wiki_backend.main as main
     return main
 
 
