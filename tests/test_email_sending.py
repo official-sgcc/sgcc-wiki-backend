@@ -19,7 +19,7 @@ class FakeResponse:
 
 def _use_resend(monkeypatch, responses):
     """provider를 resend로 고정하고 httpx.post를 가짜로 바꾼다. 호출 기록을 반환한다."""
-    import core.maintenance as maintenance
+    import sgcc_wiki_backend.core.maintenance as maintenance
 
     calls = []
 
@@ -41,8 +41,8 @@ def _use_resend(monkeypatch, responses):
 
 def _count_verifications(email):
     from sqlmodel import Session, select
-    from core.database import engine
-    from schemas.wiki_user import EmailVerification
+    from sgcc_wiki_backend.core.database import engine
+    from sgcc_wiki_backend.schemas.wiki_user import EmailVerification
     with Session(engine) as session:
         return len(session.exec(select(EmailVerification).where(EmailVerification.email == email)).all())
 
@@ -72,7 +72,7 @@ def test_verification_email_goes_through_resend_api(client, monkeypatch):
 
 
 def test_password_reset_email_is_html_with_reset_link(client, auth_headers, monkeypatch):
-    import core.maintenance as maintenance
+    import sgcc_wiki_backend.core.maintenance as maintenance
 
     _, username = auth_headers('alice123')
     calls = _use_resend(monkeypatch, [FakeResponse(200, {'id': 'msg_reset'})])
@@ -121,7 +121,7 @@ def test_same_recipient_is_throttled_by_cooldown(client):
 
 
 def test_daily_limit_blocks_further_sends(client, monkeypatch):
-    import core.maintenance as maintenance
+    import sgcc_wiki_backend.core.maintenance as maintenance
     monkeypatch.setattr(maintenance, 'EMAIL_DAILY_LIMIT', 1)
 
     assert client.post('/register/verify-email', json={'username': 'alice123', 'email': 'a@example.com'}).status_code == 200
@@ -129,7 +129,7 @@ def test_daily_limit_blocks_further_sends(client, monkeypatch):
 
 
 def test_password_reset_request_stays_200_when_throttled(client, auth_headers, monkeypatch):
-    import core.maintenance as maintenance
+    import sgcc_wiki_backend.core.maintenance as maintenance
 
     dispatched = []
     monkeypatch.setattr(maintenance, '_run_in_background', lambda func, *args: dispatched.append(args[1]))
@@ -184,7 +184,7 @@ def test_email_test_endpoint_reports_provider_result(client, admin_headers, monk
 
 
 def test_smtp_provider_uses_timeout_starttls_and_login(client, monkeypatch):
-    import core.maintenance as maintenance
+    import sgcc_wiki_backend.core.maintenance as maintenance
 
     events = []
 
@@ -241,7 +241,7 @@ def test_cooldown_normalizes_recipient_case(client):
 def test_daily_limit_reserves_headroom_for_password_reset(client, monkeypatch):
     # 회귀 방지: 가입 인증 메일이 상한을 다 써도 비밀번호 재설정 몫(10%)은 남아야 한다.
     # 총량은 EMAIL_DAILY_LIMIT을 넘지 않는다.
-    import core.maintenance as maintenance
+    import sgcc_wiki_backend.core.maintenance as maintenance
     monkeypatch.setattr(maintenance, 'EMAIL_DAILY_LIMIT', 10)   # 예약분 1 → 일반 용도 상한 9
     monkeypatch.setattr(maintenance, 'EMAIL_COOLDOWN_SECONDS', 0)
 

@@ -51,7 +51,7 @@ def auth_headers(client):
         if email is None:
             email = f'{username}@example.com'
         client.post('/register/verify-email', json={'username': username, 'email': email})
-        token = __import__('core.login_utils', fromlist=['create_email_verification_token']).create_email_verification_token(username, email)
+        token = __import__('sgcc_wiki_backend.core.login_utils', fromlist=['create_email_verification_token']).create_email_verification_token(username, email)
         client.post('/register', json={'username': username, 'password': password, 'email': email, 'verification_token': token})
         resp = client.post('/login', json={'username': username, 'password': password})
         token = resp.json()['token']
@@ -61,9 +61,9 @@ def auth_headers(client):
 
 @pytest.fixture
 def admin_headers(client, monkeypatch):
-    from core.login_utils import hash_password
-    from core.database import engine
-    from schemas.wiki_user import WikiUser
+    from sgcc_wiki_backend.core.login_utils import hash_password
+    from sgcc_wiki_backend.core.database import engine
+    from sgcc_wiki_backend.schemas.wiki_user import WikiUser
     from sqlmodel import Session
 
     username, password = 'rootadmin', 'Password1'

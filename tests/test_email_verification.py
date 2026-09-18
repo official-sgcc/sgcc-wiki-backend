@@ -1,6 +1,6 @@
 def get_verification_token(username, email):
-    from core.database import engine
-    from schemas.wiki_user import EmailVerification
+    from sgcc_wiki_backend.core.database import engine
+    from sgcc_wiki_backend.schemas.wiki_user import EmailVerification
     from sqlmodel import Session, select
 
     with Session(engine) as session:

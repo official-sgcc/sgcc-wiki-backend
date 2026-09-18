@@ -2,7 +2,7 @@ import sqlite3
 
 
 def test_register_sends_verification_email_before_account_creation(client, monkeypatch):
-    import routers.users
+    import sgcc_wiki_backend.routers as routers
 
     sent = []
     monkeypatch.setattr(routers.users, 'send_email_verification', lambda username, email: sent.append(email) or True)
@@ -12,8 +12,8 @@ def test_register_sends_verification_email_before_account_creation(client, monke
     assert sent == ['alice@example.com']
 
     from sqlmodel import Session
-    from core.database import engine
-    from schemas.wiki_user import WikiUser
+    from sgcc_wiki_backend.core.database import engine
+    from sgcc_wiki_backend.schemas.wiki_user import WikiUser
     with Session(engine) as session:
         user = session.get(WikiUser, 'alice123')
         assert user is None
@@ -23,7 +23,7 @@ def test_register_sends_verification_email_before_account_creation(client, monke
 
 
 def test_register_with_verified_email_completes_signup(client):
-    from core.login_utils import create_email_verification_token
+    from sgcc_wiki_backend.core.login_utils import create_email_verification_token
 
     token = create_email_verification_token('alice123', 'alice@example.com')
     resp = client.post('/register', json={
@@ -35,8 +35,8 @@ def test_register_with_verified_email_completes_signup(client):
     assert resp.status_code == 200
 
     from sqlmodel import Session
-    from core.database import engine
-    from schemas.wiki_user import WikiUser
+    from sgcc_wiki_backend.core.database import engine
+    from sgcc_wiki_backend.schemas.wiki_user import WikiUser
     with Session(engine) as session:
         user = session.get(WikiUser, 'alice123')
         assert user is not None
@@ -49,7 +49,7 @@ def test_register_with_verified_email_completes_signup(client):
 
 
 def test_register_duplicate_username(client):
-    from core.login_utils import create_email_verification_token
+    from sgcc_wiki_backend.core.login_utils import create_email_verification_token
 
     client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice@example.com'})
     token1 = create_email_verification_token('alice123', 'alice@example.com')
@@ -60,7 +60,7 @@ def test_register_duplicate_username(client):
 
 
 def test_register_reserved_username(client):
-    from core.login_utils import create_email_verification_token
+    from sgcc_wiki_backend.core.login_utils import create_email_verification_token
 
     token = create_email_verification_token('admin', 'admin@example.com')
     resp = client.post('/register', json={'username': 'admin', 'password': 'Password1', 'email': 'admin@example.com', 'verification_token': token})
@@ -68,7 +68,7 @@ def test_register_reserved_username(client):
 
 
 def test_register_weak_password_too_short(client):
-    from core.login_utils import create_email_verification_token
+    from sgcc_wiki_backend.core.login_utils import create_email_verification_token
 
     client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice@example.com'})
     token = create_email_verification_token('alice123', 'alice@example.com')
@@ -77,7 +77,7 @@ def test_register_weak_password_too_short(client):
 
 
 def test_register_password_missing_digit(client):
-    from core.login_utils import create_email_verification_token
+    from sgcc_wiki_backend.core.login_utils import create_email_verification_token
 
     client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice@example.com'})
     token = create_email_verification_token('alice123', 'alice@example.com')
@@ -86,7 +86,7 @@ def test_register_password_missing_digit(client):
 
 
 def test_register_invalid_username(client):
-    from core.login_utils import create_email_verification_token
+    from sgcc_wiki_backend.core.login_utils import create_email_verification_token
 
     client.post('/register/verify-email', json={'username': 'ab', 'email': 'alice@example.com'})
     token = create_email_verification_token('ab', 'alice@example.com')
@@ -95,7 +95,7 @@ def test_register_invalid_username(client):
 
 
 def test_login_unknown_user_returns_same_message_as_wrong_password(client):
-    from core.login_utils import create_email_verification_token
+    from sgcc_wiki_backend.core.login_utils import create_email_verification_token
 
     client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice@example.com'})
     token = create_email_verification_token('alice123', 'alice@example.com')
@@ -142,7 +142,7 @@ def test_register_works_with_migrated_legacy_schema(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     with TestClient(main.app) as client:
-        token = __import__('core.login_utils', fromlist=['create_email_verification_token']).create_email_verification_token('alice123', 'alice@example.com')
+        token = __import__('sgcc_wiki_backend.core.login_utils', fromlist=['create_email_verification_token']).create_email_verification_token('alice123', 'alice@example.com')
         resp = client.post('/register', json={'username': 'alice123', 'password': 'Password1', 'email': 'alice@example.com', 'verification_token': token})
         assert resp.status_code == 200
 
@@ -224,8 +224,8 @@ def test_admin_can_list_permissions_and_update_user_permission(client, auth_head
     assert update_resp.json()['permission'] == 'club_member'
 
     from sqlmodel import Session
-    from core.database import engine
-    from schemas.wiki_user import WikiUser
+    from sgcc_wiki_backend.core.database import engine
+    from sgcc_wiki_backend.schemas.wiki_user import WikiUser
     with Session(engine) as session:
         user = session.get(WikiUser, username)
         assert user is not None
@@ -246,7 +246,7 @@ def test_bearer_header_is_accepted(client, auth_headers):
 
 
 def test_password_reset_request_is_generic(client):
-    from core.login_utils import create_email_verification_token
+    from sgcc_wiki_backend.core.login_utils import create_email_verification_token
 
     client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice@example.com'})
     token = create_email_verification_token('alice123', 'alice@example.com')
@@ -259,9 +259,9 @@ def test_password_reset_request_is_generic(client):
 
 def test_password_reset_full_flow(client):
     from sqlmodel import Session
-    from core.database import engine
-    from schemas.wiki_user import WikiUser
-    from core.login_utils import create_password_reset_token, create_email_verification_token
+    from sgcc_wiki_backend.core.database import engine
+    from sgcc_wiki_backend.schemas.wiki_user import WikiUser
+    from sgcc_wiki_backend.core.login_utils import create_password_reset_token, create_email_verification_token
 
     client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice@example.com'})
     client.post('/register', json={'username': 'alice123', 'password': 'Password1', 'email': 'alice@example.com', 'verification_token': create_email_verification_token('alice123', 'alice@example.com')})
@@ -276,9 +276,9 @@ def test_password_reset_full_flow(client):
 
 def test_password_reset_token_is_single_use(client):
     from sqlmodel import Session
-    from core.database import engine
-    from schemas.wiki_user import WikiUser
-    from core.login_utils import create_password_reset_token, create_email_verification_token
+    from sgcc_wiki_backend.core.database import engine
+    from sgcc_wiki_backend.schemas.wiki_user import WikiUser
+    from sgcc_wiki_backend.core.login_utils import create_password_reset_token, create_email_verification_token
 
     client.post('/register/verify-email', json={'username': 'alice123', 'email': 'alice@example.com'})
     client.post('/register', json={'username': 'alice123', 'password': 'Password1', 'email': 'alice@example.com', 'verification_token': create_email_verification_token('alice123', 'alice@example.com')})
@@ -330,7 +330,7 @@ def test_set_email_rejects_invalid_format(client, auth_headers):
 
 
 def test_set_email_and_verify_flow(client, auth_headers):
-    from core.login_utils import create_email_verification_token
+    from sgcc_wiki_backend.core.login_utils import create_email_verification_token
 
     headers, username = auth_headers('alice123')
     resp = client.put('/email', json={'email': 'alice@example.com'}, headers=headers)
@@ -355,7 +355,7 @@ def test_email_uniqueness_conflict(client, auth_headers):
 
 
 def test_verify_token_stale_after_email_change(client, auth_headers):
-    from core.login_utils import create_email_verification_token
+    from sgcc_wiki_backend.core.login_utils import create_email_verification_token
 
     headers, username = auth_headers('alice123')
     client.put('/email', json={'email': 'first@example.com'}, headers=headers)
@@ -366,8 +366,8 @@ def test_verify_token_stale_after_email_change(client, auth_headers):
 
 
 def test_password_reset_requires_verified_email(client, auth_headers, monkeypatch):
-    import routers.users
-    from core.login_utils import create_email_verification_token
+    import sgcc_wiki_backend.routers as routers
+    from sgcc_wiki_backend.core.login_utils import create_email_verification_token
 
     # send_password_reset_email을 가로채 실제 발송(링크) 여부를 관찰한다. 응답은 항상 200이라
     # 발송 여부는 이 훅으로만 확인할 수 있다.
