@@ -5,15 +5,15 @@ import pytest
 
 # 엔진·설정은 임포트 시점에 만들어지므로, 캐시된 채로 두면 임시 DB가 아니라
 # 실제 wiki.db를 쓰게 된다. schemas는 지우지 않는다(테이블 재등록 에러 방지).
-APP_MODULES = ('main', 'core', 'routers')
+APP_MODULES = ('main', 'core', 'routers', 'sgcc_wiki_backend.main', 'sgcc_wiki_backend.core', 'sgcc_wiki_backend.routers')
 
 
 def reload_app():
     """현재 환경변수로 앱 모듈 전체를 새로 임포트해 반환한다."""
     for name in list(sys.modules):
-        if name in APP_MODULES or name.startswith(('core.', 'routers.')):
+        if name in APP_MODULES or name.startswith(('core.', 'routers.', 'sgcc_wiki_backend.core.', 'sgcc_wiki_backend.routers.')):
             del sys.modules[name]
-    import main
+    import sgcc_wiki_backend.main as main
     return main
 
 
@@ -51,7 +51,7 @@ def auth_headers(client):
         if email is None:
             email = f'{username}@example.com'
         client.post('/register/verify-email', json={'username': username, 'email': email})
-        token = __import__('core.login_utils', fromlist=['create_email_verification_token']).create_email_verification_token(username, email)
+        token = __import__('sgcc_wiki_backend.core.login_utils', fromlist=['create_email_verification_token']).create_email_verification_token(username, email)
         client.post('/register', json={'username': username, 'password': password, 'email': email, 'verification_token': token})
         resp = client.post('/login', json={'username': username, 'password': password})
         token = resp.json()['token']
@@ -63,8 +63,8 @@ def auth_headers(client):
 def club_headers(auth_headers):
     def create(*args, **kwargs):
         headers, username = auth_headers(*args, **kwargs)
-        from core.database import engine
-        from schemas.wiki_user import WikiUser
+        from sgcc_wiki_backend.core.database import engine
+        from sgcc_wiki_backend.schemas.wiki_user import WikiUser
         from sqlmodel import Session
         with Session(engine) as session:
             user = session.get(WikiUser, username)
@@ -77,9 +77,9 @@ def club_headers(auth_headers):
 
 @pytest.fixture
 def admin_headers(client, monkeypatch):
-    from core.login_utils import hash_password
-    from core.database import engine
-    from schemas.wiki_user import WikiUser
+    from sgcc_wiki_backend.core.login_utils import hash_password
+    from sgcc_wiki_backend.core.database import engine
+    from sgcc_wiki_backend.schemas.wiki_user import WikiUser
     from sqlmodel import Session
 
     username, password = 'rootadmin', 'Password1'

@@ -2,7 +2,7 @@ import pytest
 
 
 def test_legacy_lists_use_global_floor(client, auth_headers, club_headers, admin_headers):
-    from core.database import engine
+    from sgcc_wiki_backend.core.database import engine
     regular, _ = auth_headers('aclregular')
     club, _ = club_headers('aclclub')
     admin, _ = admin_headers

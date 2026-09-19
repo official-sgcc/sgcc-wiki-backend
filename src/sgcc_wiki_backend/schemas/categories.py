@@ -1,6 +1,6 @@
 from sqlmodel import SQLModel, Field
 from pydantic import BaseModel
-from core.permissions import Role
+from sgcc_wiki_backend.core.permissions import Role
 
 WritePermission = Role
 

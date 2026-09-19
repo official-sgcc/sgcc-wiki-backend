@@ -8,7 +8,7 @@ def test_healthz_reports_ok(client):
 
 
 def test_healthz_returns_503_when_db_is_unreachable(client, monkeypatch):
-    import routers.health
+    import sgcc_wiki_backend.routers as routers
 
     monkeypatch.setattr(routers.health, 'engine', create_engine('sqlite:////nonexistent-dir/x.db'))
     resp = client.get('/healthz')

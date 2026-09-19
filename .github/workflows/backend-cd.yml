@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: backend-cd-main
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -38,13 +38,22 @@ jobs:
 
             cd /home/ubuntu/sgcc-wiki-backend
 
+            if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+              echo "Refusing to deploy: .env is tracked."
+              exit 1
+            fi
             git fetch origin main
-            git reset --hard origin/main
+            if git ls-tree -r --name-only origin/main -- .env | grep -q .; then
+              echo "Refusing to deploy: origin/main contains .env."
+              exit 1
+            fi
+            deploy_sha="${{ github.event.workflow_run.head_sha || github.sha }}"
+            if [ "$(git rev-parse origin/main)" != "$deploy_sha" ]; then
+              echo "A newer main commit exists; skipping this deployment."
+              exit 0
+            fi
+            git reset --hard "$deploy_sha"
 
-            source .venv/bin/activate
-            pip install -r requirements.txt
-
-            sudo systemctl restart sgcc-wiki
-            sudo systemctl is-active --quiet sgcc-wiki
+            bash scripts/deploy-ec2.sh
 
             echo "Backend deployment completed successfully."
