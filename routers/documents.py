@@ -150,6 +150,18 @@ async def get_document_by_title(title: str, current_user: WikiUser = Depends(get
     return await get_document(title, current_user)
 
 
+@router.get('/documents/by-title/edit')
+async def get_document_for_edit_by_title(title: str, current_user: WikiUser = Depends(get_current_user)):
+    """편집할 문서를 조회한다. 조회수는 올리지 않고 수정 권한을 확인한다."""
+    with Session(engine) as session:
+        doc = session.get(WikiDoc, title)
+        if doc is None:
+            raise HTTPException(status_code=404, detail='Cannot find a document with the corresponding name.')
+        check_document_read_permission(current_user, doc)
+        check_document_permission(session, current_user, title, 'update')
+        return doc
+
+
 @router.put('/documents/by-title')
 async def update_document_by_title(
     update_data: WikiDocUpdate,
