@@ -11,6 +11,7 @@ from core.database import engine
 from core.deps import check_category_write_permission, check_document_permission, check_document_read_permission, get_current_user, validate_tags_and_category
 from schemas.permissions import Permissions
 from schemas.wiki_doc import WikiDocMove, WikiDoc, WikiDocCreate, WikiDocUpdate, WikiDocVersion
+from schemas.document_event import DocumentEvent
 from schemas.wiki_user import WikiUser
 from schemas.categories import WikiCategory
 from core.permissions import Action, Role, require_action, can_perform_document, category_name, is_admin
@@ -206,6 +207,21 @@ async def get_document_versions_by_title(title: str, current_user: WikiUser = De
     return await get_document_versions(title, current_user)
 
 
+@router.get('/documents/by-title/history-events')
+async def get_document_history_events_by_title(title: str, current_user: WikiUser = Depends(get_current_user)):
+    with Session(engine) as session:
+        doc = session.get(WikiDoc, title)
+        if doc is None:
+            raise HTTPException(status_code=404, detail='Cannot find document')
+        check_document_read_permission(current_user, doc)
+        return session.exec(
+            select(DocumentEvent).where(
+                DocumentEvent.document_title == title,
+                DocumentEvent.deleted == False,
+            ).order_by(DocumentEvent.updated_at.desc())
+        ).all()
+
+
 @router.get('/documents/by-title/version')
 async def get_document_version_by_title(title: str, version_number: int, current_user: WikiUser = Depends(get_current_user)):
     return await get_document_version(title, version_number, current_user)
@@ -285,15 +301,32 @@ async def update_document(title: str, update_data: WikiDocUpdate, current_user: 
 
         validate_tags_and_category(session, update_data.tags, update_data.category, current_user=current_user, create_missing_tags=True)
 
+        next_tags = ([tag.model_dump() if hasattr(tag, 'model_dump') else tag for tag in update_data.tags]
+                     if update_data.tags is not None else doc.tags)
+        next_category = (update_data.category.model_dump() if hasattr(update_data.category, 'model_dump') else update_data.category)
+        if update_data.category is None:
+            next_category = doc.category
+        category_unchanged = all(
+            next_category.get(field) == doc.category.get(field)
+            for field in ('name', 'parent')
+        )
+        if (
+            (update_data.content is None or update_data.content == doc.content)
+            and next_tags == doc.tags
+            and category_unchanged
+            and (update_data.is_private is None or update_data.is_private == doc.is_private)
+        ):
+            return doc
+
         for _ in range(3):
             if update_data.content is not None:
                 doc.content = update_data.content
 
             if update_data.tags is not None:
-                doc.tags = [tag.model_dump() if hasattr(tag, 'model_dump') else tag for tag in update_data.tags]
+                doc.tags = next_tags
 
             if update_data.category is not None:
-                doc.category = (update_data.category.model_dump() if hasattr(update_data.category, 'model_dump') else update_data.category)
+                doc.category = next_category
 
             if update_data.is_private is not None:
                 doc.is_private = update_data.is_private
@@ -397,6 +430,22 @@ async def move_document(title: str, move_data: WikiDocMove, current_user: WikiUs
                 delete=doc.permissions.delete,
             ))
 
+        for event in session.exec(select(DocumentEvent).where(
+            DocumentEvent.document_title == title,
+            DocumentEvent.deleted == False,
+        )).all():
+            event.document_title = new_title
+            session.add(event)
+
+        session.add(DocumentEvent(
+            document_title=new_title,
+            event_type='rename',
+            old_title=title,
+            new_title=new_title,
+            updated_by=current_user.username,
+            updated_at=datetime.now(timezone.utc),
+            is_private=doc.is_private,
+        ))
         session.delete(doc)
         session.commit()
         logger.info('document moved: %s -> %s by %s', title, new_title, current_user.username if current_user else 'unknown')
@@ -430,6 +479,21 @@ async def delete_document(title: str, current_user: WikiUser = Depends(get_curre
         if not can_perform_document(current_user, Action.DOCUMENT_DELETE, doc, permissions, category, lambda name: session.get(WikiCategory, name)):
             raise HTTPException(status_code=403, detail='Document delete permission required.')
 
+        session.add(DocumentEvent(
+            document_title=title,
+            event_type='delete',
+            old_title=title,
+            updated_by=current_user.username,
+            updated_at=datetime.now(timezone.utc),
+            is_private=doc.is_private,
+            deleted=True,
+        ))
+        for event in session.exec(select(DocumentEvent).where(
+            DocumentEvent.document_title == title,
+            DocumentEvent.deleted == False,
+        )).all():
+            event.deleted = True
+            session.add(event)
         session.delete(doc)
         session.commit()
         logger.info('document deleted: %s by %s', title, current_user.username if current_user else 'unknown')
