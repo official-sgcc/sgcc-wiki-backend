@@ -30,7 +30,7 @@ def test_category_creation_and_tag_creation_are_scoped(client, auth_headers, clu
 
 
 def test_reparent_inherits_all_ancestors_and_admin_bypasses_legacy_acl(client, club_headers, admin_headers):
-    from core.database import engine
+    from sgcc_wiki_backend.core.database import engine
     club, _ = club_headers('inherit123')
     admin, _ = admin_headers
     for name, parent in [('Locked', None), ('Root', None), ('Child', 'Root'), ('Leaf', 'Child')]:

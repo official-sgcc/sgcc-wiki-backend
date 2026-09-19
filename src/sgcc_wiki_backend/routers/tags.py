@@ -3,13 +3,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlmodel import Session, select
-from core.config import logger
-from core.database import engine
-from core.deps import get_current_user
-from core.permissions import Action, require_action
-from schemas.tags import WikiTag, WikiTagCreate
-from schemas.wiki_doc import WikiDoc
-from schemas.wiki_user import WikiUser
+from sgcc_wiki_backend.core.config import logger
+from sgcc_wiki_backend.core.database import engine
+from sgcc_wiki_backend.core.deps import get_current_user
+from sgcc_wiki_backend.core.permissions import Action, require_action
+from sgcc_wiki_backend.schemas.tags import WikiTag, WikiTagCreate
+from sgcc_wiki_backend.schemas.wiki_doc import WikiDoc
+from sgcc_wiki_backend.schemas.wiki_user import WikiUser
 
 router = APIRouter()
 

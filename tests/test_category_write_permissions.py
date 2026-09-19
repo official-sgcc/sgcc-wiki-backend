@@ -33,7 +33,7 @@ def test_checks_database_setting_instead_of_submitted_category(client, auth_head
 
 
 def test_legacy_categories_migrate_once(client):
-    from core.database import engine, migrate_legacy_schema
+    from sgcc_wiki_backend.core.database import engine, migrate_legacy_schema
     with engine.begin() as connection:
         connection.exec_driver_sql('DROP TABLE wikicategory')
         connection.exec_driver_sql('CREATE TABLE wikicategory (name VARCHAR PRIMARY KEY, parent VARCHAR)')
@@ -48,7 +48,7 @@ def test_legacy_categories_migrate_once(client):
 
 
 def test_app_restart_with_existing_documents_and_old_category_schema(client, auth_headers, club_headers, admin_headers):
-    from core.database import engine
+    from sgcc_wiki_backend.core.database import engine
     from tests.conftest import reload_app
     from fastapi.testclient import TestClient
     regular, _ = auth_headers('legacyregular')

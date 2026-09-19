@@ -3,8 +3,8 @@
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import text
 from sqlmodel import Session
-from core.config import logger
-from core.database import engine
+from sgcc_wiki_backend.core.config import logger
+from sgcc_wiki_backend.core.database import engine
 
 router = APIRouter()
 

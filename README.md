@@ -24,26 +24,30 @@
 
 ```
 sgcc-wiki-backend/
-├── main.py                 # 앱 조립 (미들웨어, lifespan, 라우터 등록) — 루트의 유일한 파이썬 파일
-├── core/
+├── main.py                 # 기존 EC2 실행 명령을 위한 호환 진입점
+├── src/sgcc_wiki_backend/
+│   ├── main.py             # 앱 조립 (미들웨어, lifespan, 라우터 등록)
+│   ├── core/
 │   ├── config.py           # 환경변수, 로깅, rate limiter
 │   ├── database.py         # SQLite 엔진과 테이블 생성
 │   ├── deps.py             # 인증 의존성, 권한·입력 검증 헬퍼
 │   ├── login_utils.py      # 비밀번호 해시, JWT/TOTP 토큰, 입력 검증
 │   └── maintenance.py      # 메일 발송(provider·재시도·한도), DB 백업, 관리자 부트스트랩
-├── routers/
+│   ├── routers/
 │   ├── documents.py        # 문서 CRUD, 버전·diff, 검색
 │   ├── users.py            # 가입·로그인, 2FA, 이메일, 비밀번호 재설정
 │   ├── tags.py             # 태그
 │   ├── categories.py       # 카테고리
 │   └── health.py           # 헬스체크
-├── schemas/
+│   └── schemas/
 │   ├── wiki_doc.py         # WikiDoc, WikiDocVersion
 │   ├── wiki_user.py        # WikiUser + 요청 바디 모델
 │   ├── permissions.py      # 문서별 권한
 │   ├── tags.py             # 태그
 │   └── categories.py       # 카테고리 (+ 트리 응답 모델)
 ├── tests/                  # pytest (conftest.py가 임시 DB로 격리)
+├── pyproject.toml          # 프로젝트 의존성
+├── uv.lock                 # 고정된 의존성 버전
 ├── db_backups/             # 자동 백업 (gitignore)
 ├── logs/                   # app.log + 회전 백업 (gitignore)
 ├── wiki.db                 # SQLite 데이터베이스 (gitignore, 없으면 서버 시작 시 자동 생성)
@@ -53,13 +57,13 @@ sgcc-wiki-backend/
 ## 빠른 시작
 
 ```bash
-pip install fastapi sqlmodel bcrypt pyjwt python-dotenv uvicorn apscheduler diff_match_patch slowapi pyotp
+uv sync --locked
 ```
 
 프로젝트 루트에 `.env`를 만들고 최소한 `JWT_SECRET_KEY`를 설정한 뒤 실행합니다(미설정이면 서버가 시작을 거부합니다).
 
 ```bash
-uvicorn main:app --reload
+uv run uvicorn sgcc_wiki_backend:app --reload
 ```
 
 - 서버: http://127.0.0.1:8000
@@ -68,13 +72,12 @@ uvicorn main:app --reload
 테스트:
 
 ```bash
-pip install pytest httpx
-pytest
+uv run pytest
 ```
 
 ## Docker
 
-이 프로젝트는 루트의 `Dockerfile`로 컨테이너 이미지를 빌드할 수 있습니다. 기본 베이스 이미지는 `python:3.11-slim`이며, 의존성 설치 후 `uvicorn main:app --host 0.0.0.0 --port 8000`을 실행합니다.
+이 프로젝트는 루트의 `Dockerfile`로 컨테이너 이미지를 빌드할 수 있습니다. Python 3.12 기반 이미지에서 잠금 파일로 의존성을 설치하고 `sgcc_wiki_backend:app`을 실행합니다.
 
 ### 이미지 빌드
 
@@ -99,8 +102,8 @@ docker run --rm -it \
 
 ### Dockerfile 동작 요약
 
-- Python 3.11 slim 이미지 사용
-- `requirements.txt`를 설치해 런타임 의존성 구성
+- Python 3.12 slim 이미지 사용
+- `uv.lock`으로 런타임 의존성 구성
 - 소스코드를 `/app`에 복사
 - 컨테이너 내부에서 `uvicorn`으로 FastAPI 앱 실행
 - 기본 포트는 `8000`이며, 현재 `CMD`는 포트를 하드코딩하고 있어 컨테이너 실행 시 `-p 8000:8000` 조합이 가장 안전합니다

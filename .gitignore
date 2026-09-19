@@ -1,5 +1,7 @@
 __pycache__/
 .venv/
+.uv-prep/
+.uv-local-cache/
 venv/
 .env
 .vscode/settings.json

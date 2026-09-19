@@ -119,8 +119,8 @@ def test_create_document_does_not_create_comment_permission(client, club_headers
     }, headers=headers)
     assert resp.status_code == 200
 
-    from core.database import engine
-    from schemas.permissions import Permissions
+    from sgcc_wiki_backend.core.database import engine
+    from sgcc_wiki_backend.schemas.permissions import Permissions
     from sqlmodel import Session
 
     with Session(engine) as session:

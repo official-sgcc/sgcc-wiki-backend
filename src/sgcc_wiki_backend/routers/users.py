@@ -5,13 +5,13 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
-from core.config import FRONTEND_URL, RESERVED_USERNAMES, limiter, logger
-from core.database import engine
+from sgcc_wiki_backend.core.config import FRONTEND_URL, RESERVED_USERNAMES, limiter, logger
+from sgcc_wiki_backend.core.database import engine
 from datetime import datetime
-from core.deps import get_current_user
-from core.permissions import Action, Role, require_action, permission_context, can_write_category, is_admin
-from schemas.categories import WikiCategory
-from core.login_utils import (
+from sgcc_wiki_backend.core.deps import get_current_user
+from sgcc_wiki_backend.core.permissions import Action, Role, require_action, permission_context, can_write_category, is_admin
+from sgcc_wiki_backend.schemas.categories import WikiCategory
+from sgcc_wiki_backend.core.login_utils import (
     hash_password, verify_password, create_jwt_token,
     validate_username, validate_password, validate_email,
     create_mfa_token, verify_mfa_token,
@@ -21,16 +21,16 @@ from core.login_utils import (
     DUMMY_PASSWORD_HASH, PASSWORD_RESET_EXPIRE_MINUTES,
     matches_registration_secret,
 )
-from core.maintenance import reserve_email_slot, send_email_verification, send_password_reset_email, send_test_email_now
-from schemas.wiki_doc import WikiDocVersion
-from schemas.document_event import DocumentEvent
-from schemas.wiki_user import (
+from sgcc_wiki_backend.core.maintenance import reserve_email_slot, send_email_verification, send_password_reset_email, send_test_email_now
+from sgcc_wiki_backend.schemas.wiki_doc import WikiDocVersion
+from sgcc_wiki_backend.schemas.document_event import DocumentEvent
+from sgcc_wiki_backend.schemas.wiki_user import (
     WikiUser, UserRegisterForm, RegisterEmailRequest, UserIdAndPassword,
     PasswordResetRequest, PasswordResetConfirm, TotpCode, TotpLogin,
     EmailUpdate, BioUpdate, ProfileUpdate, EmailVerify, PermissionUpdate,
     ALLOWED_USER_PERMISSIONS,
 )
-from schemas.wiki_user import EmailVerification
+from sgcc_wiki_backend.schemas.wiki_user import EmailVerification
 
 # 발송 한도(쿨다운·일일 상한)에 걸린 사용자용 엔드포인트가 공통으로 쓰는 429 detail.
 EMAIL_THROTTLED_DETAIL = 'Too many emails requested for this address. Please try again later.'
@@ -46,8 +46,8 @@ async def logout(request: Request, current_user: WikiUser = Depends(get_current_
     import jwt
     from sqlalchemy import delete
     from sqlalchemy.dialects.sqlite import insert
-    from schemas.wiki_user import RevokedToken
-    from core.login_utils import JWT_SECRET_KEY, JWT_ALGORITHM
+    from sgcc_wiki_backend.schemas.wiki_user import RevokedToken
+    from sgcc_wiki_backend.core.login_utils import JWT_SECRET_KEY, JWT_ALGORITHM
     if current_user is None:
         raise HTTPException(status_code=401, detail='Login required')
     authorization = request.headers.get('authorization', '')

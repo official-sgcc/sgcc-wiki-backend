@@ -1,5 +1,5 @@
 def test_author_delete_survives_demotion_and_restrictions(client, club_headers, auth_headers, admin_headers):
-    from core.database import engine
+    from sgcc_wiki_backend.core.database import engine
     owner, username = club_headers('deleteowner')
     other, _ = auth_headers('deleteother')
     admin, _ = admin_headers

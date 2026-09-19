@@ -2,15 +2,15 @@
 
 from fastapi import Header, HTTPException, status
 from sqlmodel import Session
-from core.database import engine
-from core.login_utils import verify_jwt_token
-from schemas.categories import WikiCategory
-from schemas.permissions import Permissions
-from schemas.tags import WikiTag
-from schemas.wiki_user import WikiUser, RevokedToken
+from sgcc_wiki_backend.core.database import engine
+from sgcc_wiki_backend.core.login_utils import verify_jwt_token
+from sgcc_wiki_backend.schemas.categories import WikiCategory
+from sgcc_wiki_backend.schemas.permissions import Permissions
+from sgcc_wiki_backend.schemas.tags import WikiTag
+from sgcc_wiki_backend.schemas.wiki_user import WikiUser, RevokedToken
 import hashlib
-from schemas.wiki_doc import WikiDoc
-from core.permissions import DOCUMENT_FIELDS, category_name, can_write_category, can_perform_document, can_read_document
+from sgcc_wiki_backend.schemas.wiki_doc import WikiDoc
+from sgcc_wiki_backend.core.permissions import DOCUMENT_FIELDS, category_name, can_write_category, can_perform_document, can_read_document
 
 async def get_current_user(
     auth: str | None = Header(None),
