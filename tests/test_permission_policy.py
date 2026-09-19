@@ -18,12 +18,12 @@ def user(role, username='someone'):
     (None, 'login_user', False),
 ])
 def test_role_thresholds(role, minimum, expected):
-    from core.permissions import has_minimum_role
+    from sgcc_wiki_backend.core.permissions import has_minimum_role
     assert has_minimum_role(user(role) if role else None, minimum) is expected
 
 
 def test_new_enum_roles_inherit_grades_but_not_admin_access(monkeypatch):
-    import core.permissions as policy
+    import sgcc_wiki_backend.core.permissions as policy
     original = policy.Role
     expanded = Enum('ExpandedRole', {**{role.name: role.value for role in original},
         'SENIOR_MEMBER': 'senior_member', 'HIGH_GRADE_MEMBER': 'high_grade_member'}, type=str)
@@ -44,7 +44,7 @@ def test_new_enum_roles_inherit_grades_but_not_admin_access(monkeypatch):
 
 @pytest.mark.parametrize('roles', [[], ['unknown'], ['login_user', 'unknown'], None, 'login_user'])
 def test_admin_bypasses_invalid_or_empty_document_settings(roles):
-    from core.permissions import meets_document_roles
+    from sgcc_wiki_backend.core.permissions import meets_document_roles
     assert meets_document_roles(user('admin'), roles)
 
 
@@ -80,8 +80,8 @@ def test_document_capabilities_match_enforcement_and_rename_preserves_data(clien
 
 
 def test_reading_capabilities_does_not_increment_views(client, club_headers, admin_headers):
-    from core.database import engine
-    from schemas.wiki_doc import WikiDoc
+    from sgcc_wiki_backend.core.database import engine
+    from sgcc_wiki_backend.schemas.wiki_doc import WikiDoc
     from sqlmodel import Session
     club, _, _ = seed(client, club_headers, admin_headers)
     for _ in range(2):
@@ -91,7 +91,7 @@ def test_reading_capabilities_does_not_increment_views(client, club_headers, adm
 
 
 def test_document_lists_combine_with_category_and_admin_bypass(client, club_headers, admin_headers):
-    from core.database import engine
+    from sgcc_wiki_backend.core.database import engine
     club, admin, _ = seed(client, club_headers, admin_headers)
     with engine.begin() as connection:
         connection.exec_driver_sql("UPDATE permissions SET \"update\" = '[]', rename = '[]', move = '[]'")
@@ -114,7 +114,7 @@ def test_category_restriction_blocks_rename_and_missing_auth_denies(client, club
 
 
 def test_legacy_permissions_migrate_on_app_restart_and_retain_custom_settings(client, club_headers, admin_headers):
-    from core.database import engine
+    from sgcc_wiki_backend.core.database import engine
     from tests.conftest import reload_app
     from fastapi.testclient import TestClient
     club, admin, _ = seed(client, club_headers, admin_headers)
@@ -129,8 +129,8 @@ def test_legacy_permissions_migrate_on_app_restart_and_retain_custom_settings(cl
         assert caps['document_move'] is False
         assert restarted.put('/documents/by-title', params={'title': 'Old/Title'}, json={'content': 'category policy'}, headers=club).status_code == 403
         assert restarted.put('/documents/by-title/move', params={'title': 'Old/Title'}, json={'new_title': 'Renamed'}, headers=admin).status_code == 200
-        from core.database import engine, migrate_legacy_schema
-        from schemas.permissions import Permissions
+        from sgcc_wiki_backend.core.database import engine, migrate_legacy_schema
+        from sgcc_wiki_backend.schemas.permissions import Permissions
         from sqlmodel import Session
         with Session(engine) as session:
             permissions = session.get(Permissions, 'Renamed')

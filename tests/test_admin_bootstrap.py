@@ -1,8 +1,8 @@
 def test_bootstrap_syncs_password_only_when_changed(client, admin_headers, monkeypatch):
-    from core.maintenance import bootstrap_admin
-    from core.database import engine
-    from core.login_utils import verify_password, create_mfa_token
-    from schemas.wiki_user import WikiUser
+    from sgcc_wiki_backend.core.maintenance import bootstrap_admin
+    from sgcc_wiki_backend.core.database import engine
+    from sgcc_wiki_backend.core.login_utils import verify_password, create_mfa_token
+    from sgcc_wiki_backend.schemas.wiki_user import WikiUser
     from sqlmodel import Session
     headers, username = admin_headers
     monkeypatch.setenv('ADMIN_USERNAME', username)
@@ -37,10 +37,10 @@ def test_bootstrap_syncs_password_only_when_changed(client, admin_headers, monke
 
 
 def test_bootstrap_creation_promotion_and_other_accounts(client, auth_headers, monkeypatch):
-    from core.maintenance import bootstrap_admin
-    from core.database import engine
-    from core.login_utils import verify_password
-    from schemas.wiki_user import WikiUser
+    from sgcc_wiki_backend.core.maintenance import bootstrap_admin
+    from sgcc_wiki_backend.core.database import engine
+    from sgcc_wiki_backend.core.login_utils import verify_password
+    from sgcc_wiki_backend.schemas.wiki_user import WikiUser
     from sqlmodel import Session
     _, regular = auth_headers('regularbootstrap')
     monkeypatch.setenv('ADMIN_USERNAME', 'configuredadmin')

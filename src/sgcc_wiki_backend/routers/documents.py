@@ -6,15 +6,15 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
 from sqlmodel import Session, select
-from core.config import logger
-from core.database import engine
-from core.deps import check_category_write_permission, check_document_permission, check_document_read_permission, get_current_user, validate_tags_and_category
-from schemas.permissions import Permissions
-from schemas.wiki_doc import WikiDocMove, WikiDoc, WikiDocCreate, WikiDocUpdate, WikiDocVersion
-from schemas.document_event import DocumentEvent
-from schemas.wiki_user import WikiUser
-from schemas.categories import WikiCategory
-from core.permissions import Action, Role, require_action, can_perform_document, category_name, is_admin
+from sgcc_wiki_backend.core.config import logger
+from sgcc_wiki_backend.core.database import engine
+from sgcc_wiki_backend.core.deps import check_category_write_permission, check_document_permission, check_document_read_permission, get_current_user, validate_tags_and_category
+from sgcc_wiki_backend.schemas.permissions import Permissions
+from sgcc_wiki_backend.schemas.wiki_doc import WikiDocMove, WikiDoc, WikiDocCreate, WikiDocUpdate, WikiDocVersion
+from sgcc_wiki_backend.schemas.document_event import DocumentEvent
+from sgcc_wiki_backend.schemas.wiki_user import WikiUser
+from sgcc_wiki_backend.schemas.categories import WikiCategory
+from sgcc_wiki_backend.core.permissions import Action, Role, require_action, can_perform_document, category_name, is_admin
 
 router = APIRouter()
 

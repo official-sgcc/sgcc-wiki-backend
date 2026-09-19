@@ -25,8 +25,8 @@ def test_security_state_is_private_and_profiles_cannot_be_changed_by_others(clie
 
 
 def test_demotion_takes_effect_with_existing_access_token(client, auth_headers, admin_headers):
-    from core.database import engine
-    from schemas.wiki_user import WikiUser
+    from sgcc_wiki_backend.core.database import engine
+    from sgcc_wiki_backend.schemas.wiki_user import WikiUser
     from sqlmodel import Session
     headers, username = auth_headers('secondadmin')
     admin, _ = admin_headers
@@ -67,9 +67,9 @@ def test_2fa_settings_limit_code_guesses(client, auth_headers, endpoint):
 def test_password_reset_revokes_old_access_and_pending_mfa_tokens(client, auth_headers):
     import pyotp
     from sqlmodel import Session
-    from core.database import engine
-    from core.login_utils import create_password_reset_token
-    from schemas.wiki_user import WikiUser
+    from sgcc_wiki_backend.core.database import engine
+    from sgcc_wiki_backend.core.login_utils import create_password_reset_token
+    from sgcc_wiki_backend.schemas.wiki_user import WikiUser
     headers, username = auth_headers('resetsecurity')
     secret = client.post('/2fa/setup', headers=headers).json()['secret']
     assert client.post('/2fa/enable', json={'code': pyotp.TOTP(secret).now()}, headers=headers).status_code == 200
@@ -86,8 +86,8 @@ def test_password_reset_revokes_old_access_and_pending_mfa_tokens(client, auth_h
 
 
 def test_session_version_migration_preserves_existing_users_and_is_idempotent(client, auth_headers):
-    from core.database import engine, migrate_legacy_schema
-    from core.login_utils import JWT_SECRET_KEY, JWT_ALGORITHM
+    from sgcc_wiki_backend.core.database import engine, migrate_legacy_schema
+    from sgcc_wiki_backend.core.login_utils import JWT_SECRET_KEY, JWT_ALGORITHM
     import jwt
     headers, username = auth_headers('legacy_session')
     # Existing signed access tokens did not contain a session version.

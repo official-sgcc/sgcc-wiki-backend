@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from .permissions import Permissions
 from typing import Optional
 from datetime import datetime
-from core.permissions import role_names
+from sgcc_wiki_backend.core.permissions import role_names
 
 class UserRegisterForm(BaseModel):
     username: str
