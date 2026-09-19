@@ -11,6 +11,7 @@ class WikiDoc(SQLModel, table=True):
     content: str
     category: WikiCategory = Field(sa_type=JSON)
     tags: list[WikiTag] = Field(default_factory=list, sa_type=JSON)
+    is_private: bool = Field(default=False)
     view_count: int = Field(default=0)
     created_by: str | None = None
     updated_at: datetime
@@ -27,11 +28,13 @@ class WikiDocCreate(BaseModel):
     content: str
     category: WikiCategory
     tags: list[WikiTag] = Field(default_factory=list)
+    is_private: bool = False
 
 class WikiDocUpdate(BaseModel):
     content: str | None = None
     category: WikiCategory | None = None
     tags: list[WikiTag] | None = None
+    is_private: bool | None = None
 
 class WikiDocMove(BaseModel):
     # Tests and frontend send {"new_title": "..."}; accept that key as the

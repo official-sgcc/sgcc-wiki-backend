@@ -10,7 +10,7 @@ from schemas.tags import WikiTag
 from schemas.wiki_user import WikiUser, RevokedToken
 import hashlib
 from schemas.wiki_doc import WikiDoc
-from core.permissions import DOCUMENT_FIELDS, category_name, can_write_category, can_perform_document
+from core.permissions import DOCUMENT_FIELDS, category_name, can_write_category, can_perform_document, can_read_document
 
 async def get_current_user(
     auth: str | None = Header(None),
@@ -77,6 +77,12 @@ def check_document_permission(session: Session, current_user: WikiUser, title: s
     document_action = next((key for key, field in DOCUMENT_FIELDS.items() if field == action), None)
     if not document or not can_perform_document(current_user, document_action, document, permission, category, lambda name: session.get(WikiCategory, name)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f'Requires document-specific \'{action}\' permission')
+
+
+def check_document_read_permission(current_user: WikiUser, document: WikiDoc):
+    """비공개 문서의 관리자 전용 조회 권한을 검사한다."""
+    if not can_read_document(current_user, document):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Cannot find a document with the corresponding name.')
 
 def validate_tags_and_category(session: Session, tags, category, current_user=None, create_missing_tags=False):
     """문서에 지정된 태그·카테고리가 DB에 실제로 존재하는지 검증한다.

@@ -127,8 +127,15 @@ def can_write_category(user, category, lookup=None):
     return has_minimum_role(user, effective_category_role(category, lookup))
 
 
+def can_read_document(user, document):
+    """비공개 문서는 관리자만 읽을 수 있는지 검사한다."""
+    return document is not None and (not document.is_private or is_admin(user))
+
+
 def can_perform_document(user, action, document, permissions, category, lookup=None):
     if action not in DOCUMENT_FIELDS or document is None:
+        return False
+    if document.is_private and not is_admin(user):
         return False
     if is_admin(user):
         return True
