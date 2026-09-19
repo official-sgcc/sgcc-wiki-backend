@@ -9,7 +9,7 @@ from core.config import FRONTEND_URL, RESERVED_USERNAMES, limiter, logger
 from core.database import engine
 from datetime import datetime
 from core.deps import get_current_user
-from core.permissions import Action, Role, require_action, permission_context, can_write_category
+from core.permissions import Action, Role, require_action, permission_context, can_write_category, is_admin
 from schemas.categories import WikiCategory
 from core.login_utils import (
     hash_password, verify_password, create_jwt_token,
@@ -23,6 +23,7 @@ from core.login_utils import (
 )
 from core.maintenance import reserve_email_slot, send_email_verification, send_password_reset_email, send_test_email_now
 from schemas.wiki_doc import WikiDocVersion
+from schemas.document_event import DocumentEvent
 from schemas.wiki_user import (
     WikiUser, UserRegisterForm, RegisterEmailRequest, UserIdAndPassword,
     PasswordResetRequest, PasswordResetConfirm, TotpCode, TotpLogin,
@@ -236,11 +237,16 @@ async def get_user_info(username: str, current_user: WikiUser = Depends(get_curr
             .where(WikiDocVersion.updated_by == username)
             .order_by(WikiDocVersion.updated_at.desc())
         ).all()
+        edit_events_query = select(DocumentEvent).where(DocumentEvent.updated_by == username)
+        if current_user is None or (current_user.username != username and not is_admin(current_user)):
+            edit_events_query = edit_events_query.where(DocumentEvent.is_private == False)
+        edit_events = session.exec(edit_events_query.order_by(DocumentEvent.updated_at.desc())).all()
         if current_user is None or current_user.username != username:
             user_data = user.model_dump(include={'username', 'permission', 'nickname', 'bio', 'github_url'})
         else:
             user_data = user.model_dump(include={'username', 'permission', 'nickname', 'bio', 'github_url', 'email', 'email_verified', 'totp_enabled'})
         user_data['edit_versions'] = edit_versions
+        user_data['edit_events'] = edit_events
         return user_data
 
 
