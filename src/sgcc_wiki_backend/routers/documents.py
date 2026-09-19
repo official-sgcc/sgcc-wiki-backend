@@ -12,6 +12,7 @@ from sgcc_wiki_backend.core.deps import check_category_write_permission, check_d
 from sgcc_wiki_backend.schemas.permissions import Permissions
 from sgcc_wiki_backend.schemas.wiki_doc import WikiDocMove, WikiDoc, WikiDocCreate, WikiDocUpdate, WikiDocVersion
 from sgcc_wiki_backend.schemas.document_event import DocumentEvent
+from sgcc_wiki_backend.schemas.document_like import DocumentLike
 from sgcc_wiki_backend.schemas.wiki_user import WikiUser
 from sgcc_wiki_backend.schemas.categories import WikiCategory
 from sgcc_wiki_backend.core.permissions import Action, Role, require_action, can_perform_document, category_name, is_admin
@@ -161,6 +162,58 @@ async def get_document_for_edit_by_title(title: str, current_user: WikiUser = De
         check_document_read_permission(current_user, doc)
         check_document_permission(session, current_user, title, 'update')
         return doc
+
+
+def document_like_state(session: Session, title: str, current_user: WikiUser | None) -> dict:
+    count = session.exec(
+        select(func.count()).select_from(DocumentLike).where(DocumentLike.document_title == title)
+    ).one()
+    liked = bool(current_user and session.get(DocumentLike, (title, current_user.username)))
+    return {'count': int(count), 'liked': liked}
+
+
+@router.get('/documents/by-title/likes')
+async def get_document_likes(title: str, current_user: WikiUser = Depends(get_current_user)):
+    with Session(engine) as session:
+        doc = session.get(WikiDoc, title)
+        if doc is None:
+            raise HTTPException(status_code=404, detail='Cannot find document')
+        check_document_read_permission(current_user, doc)
+        return document_like_state(session, title, current_user)
+
+
+@router.post('/documents/by-title/likes')
+async def like_document(title: str, current_user: WikiUser = Depends(get_current_user)):
+    if current_user is None:
+        raise HTTPException(status_code=401, detail='Login required')
+    with Session(engine) as session:
+        doc = session.get(WikiDoc, title)
+        if doc is None:
+            raise HTTPException(status_code=404, detail='Cannot find document')
+        check_document_read_permission(current_user, doc)
+        if session.get(DocumentLike, (title, current_user.username)) is None:
+            session.add(DocumentLike(document_title=title, username=current_user.username))
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()  # 동시 요청도 하나의 좋아요로 취급한다.
+        return document_like_state(session, title, current_user)
+
+
+@router.delete('/documents/by-title/likes')
+async def unlike_document(title: str, current_user: WikiUser = Depends(get_current_user)):
+    if current_user is None:
+        raise HTTPException(status_code=401, detail='Login required')
+    with Session(engine) as session:
+        doc = session.get(WikiDoc, title)
+        if doc is None:
+            raise HTTPException(status_code=404, detail='Cannot find document')
+        check_document_read_permission(current_user, doc)
+        like = session.get(DocumentLike, (title, current_user.username))
+        if like is not None:
+            session.delete(like)
+            session.commit()
+        return document_like_state(session, title, current_user)
 
 
 @router.put('/documents/by-title')
@@ -430,6 +483,10 @@ async def move_document(title: str, move_data: WikiDocMove, current_user: WikiUs
                 delete=doc.permissions.delete,
             ))
 
+        for like in session.exec(select(DocumentLike).where(DocumentLike.document_title == title)).all():
+            session.add(DocumentLike(document_title=new_title, username=like.username, created_at=like.created_at))
+            session.delete(like)
+
         for event in session.exec(select(DocumentEvent).where(
             DocumentEvent.document_title == title,
             DocumentEvent.deleted == False,
@@ -494,6 +551,8 @@ async def delete_document(title: str, current_user: WikiUser = Depends(get_curre
         )).all():
             event.deleted = True
             session.add(event)
+        for like in session.exec(select(DocumentLike).where(DocumentLike.document_title == title)).all():
+            session.delete(like)
         session.delete(doc)
         session.commit()
         logger.info('document deleted: %s by %s', title, current_user.username if current_user else 'unknown')
