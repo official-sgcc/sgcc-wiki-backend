@@ -9,6 +9,7 @@ from core.config import DB_PATH
 
 # create_all이 테이블을 알려면 모델 모듈이 먼저 임포트돼 metadata에 등록돼야 한다.
 from schemas.wiki_doc import WikiDoc, WikiDocVersion
+from schemas.document_event import DocumentEvent
 from schemas.wiki_user import WikiUser
 from schemas.permissions import Permissions
 from schemas.tags import WikiTag
