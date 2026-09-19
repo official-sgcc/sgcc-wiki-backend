@@ -10,6 +10,7 @@ from sgcc_wiki_backend.core.config import DB_PATH
 # create_all이 테이블을 알려면 모델 모듈이 먼저 임포트돼 metadata에 등록돼야 한다.
 from sgcc_wiki_backend.schemas.wiki_doc import WikiDoc, WikiDocVersion
 from sgcc_wiki_backend.schemas.document_event import DocumentEvent
+from sgcc_wiki_backend.schemas.document_like import DocumentLike
 from sgcc_wiki_backend.schemas.wiki_user import WikiUser
 from sgcc_wiki_backend.schemas.permissions import Permissions
 from sgcc_wiki_backend.schemas.tags import WikiTag
