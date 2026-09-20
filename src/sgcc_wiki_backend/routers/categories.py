@@ -5,6 +5,7 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 from sgcc_wiki_backend.core.config import logger
 from sgcc_wiki_backend.core.database import engine
+from sgcc_wiki_backend.core.document_lists import with_like_counts
 from sgcc_wiki_backend.core.deps import get_current_user
 from sgcc_wiki_backend.core.permissions import Action, require_action, can_write_category, effective_category_role, role_rank, Role, is_admin
 from sgcc_wiki_backend.schemas.categories import WikiCategory, WikiCategoryCreate, WikiCategoryNode, WikiCategoryUpdate
@@ -117,8 +118,8 @@ async def get_category(name: str, current_user: WikiUser = Depends(get_current_u
         return build_category_node(name, all_cats, cat_map, current_user)
 
 @router.get('/categories/{name}/documents')
-async def get_documents_by_category(name: str, recursive: bool = False, limit: int | None = None, offset: int = 0):
-    """해당 카테고리에 속한 문서를 조회한다. (인증 불필요)
+async def get_documents_by_category(name: str, recursive: bool = False, limit: int | None = None, offset: int = 0, current_user: WikiUser = Depends(get_current_user)):
+    """해당 카테고리에 속한 문서를 조회한다. 비공개 문서는 관리자에게만 표시한다.
 
     문서의 category(JSON)의 name이 대상과 일치하는 문서를 반환한다. 기본은 지정한
     카테고리에 정확히 속한 문서만이며, recursive=true면 하위 카테고리(자식·손자…)에
@@ -149,10 +150,12 @@ async def get_documents_by_category(name: str, recursive: bool = False, limit: i
 
         # JSON 컬럼의 contains는 직렬화된 문자열 LIKE라 {'name': ...}만으로는 매칭되지 않는다.
         statement = select(WikiDoc).where(func.json_extract(WikiDoc.category, '$.name').in_(target_names))
+        if not is_admin(current_user):
+            statement = statement.where(WikiDoc.is_private == False)
 
         if limit is not None:
             statement = statement.offset(offset).limit(limit)
-        return session.exec(statement).all()
+        return with_like_counts(session, session.exec(statement).all())
 
 @router.put('/categories/{name}')
 async def update_category(name: str, update_data: WikiCategoryUpdate, current_user: WikiUser = Depends(get_current_user)):
