@@ -5,8 +5,9 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 from sgcc_wiki_backend.core.config import logger
 from sgcc_wiki_backend.core.database import engine
+from sgcc_wiki_backend.core.document_lists import with_like_counts
 from sgcc_wiki_backend.core.deps import get_current_user
-from sgcc_wiki_backend.core.permissions import Action, require_action
+from sgcc_wiki_backend.core.permissions import Action, require_action, is_admin
 from sgcc_wiki_backend.schemas.tags import WikiTag, WikiTagCreate
 from sgcc_wiki_backend.schemas.wiki_doc import WikiDoc
 from sgcc_wiki_backend.schemas.wiki_user import WikiUser
@@ -24,8 +25,8 @@ async def get_tags():
         return session.exec(select(WikiTag)).all()
 
 @router.get('/tags/{name}/documents')
-async def get_documents_by_tag(name: str, limit: int | None = None, offset: int = 0):
-    """해당 태그가 달린 모든 문서를 조회한다. (인증 불필요)
+async def get_documents_by_tag(name: str, limit: int | None = None, offset: int = 0, current_user: WikiUser = Depends(get_current_user)):
+    """해당 태그가 달린 문서를 조회한다. 비공개 문서는 관리자에게만 표시한다.
 
     JSON 부분검색으로 후보를 좁힌 뒤, 태그명이 정확히 일치하는 문서만 남긴다
     (검색의 search_type='tag'와 동일한 매칭 규칙).
@@ -51,9 +52,11 @@ async def get_documents_by_tag(name: str, limit: int | None = None, offset: int 
         statement = select(WikiDoc).where(
             select(1).select_from(tag_entries).where(func.json_extract(tag_entries.c.value, '$.name') == name).exists()
         )
+        if not is_admin(current_user):
+            statement = statement.where(WikiDoc.is_private == False)
         if limit is not None:
             statement = statement.offset(offset).limit(limit)
-        return session.exec(statement).all()
+        return with_like_counts(session, session.exec(statement).all())
 
 @router.delete('/tags/{name}')
 async def delete_tag(name: str, current_user: WikiUser = Depends(get_current_user)):
