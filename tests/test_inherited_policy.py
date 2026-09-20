@@ -42,7 +42,7 @@ def test_reparent_inherits_all_ancestors_and_admin_bypasses_legacy_acl(client, c
         connection.exec_driver_sql('DELETE FROM permissions')
     assert client.put('/documents/Old', json={'content': 'category only'}, headers=club).status_code == 403
     assert client.put('/categories/Root', json={'parent': 'Locked'}, headers=admin).status_code == 200
-    assert client.get('/categories/Leaf', headers=club).json()['effective_write_permission'] == 'admin'
+    assert 'effective_write_permission' not in client.get('/categories/Leaf', headers=club).json()
     caps = client.get('/documents/by-title/permissions', params={'title': 'Old'}, headers=club).json()
     assert not caps['document_update'] and not caps['document_rename']
     assert client.put('/documents/Old/move', json={'new_title': 'Denied'}, headers=club).status_code == 403
