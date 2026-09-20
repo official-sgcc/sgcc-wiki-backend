@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from diff_match_patch import diff_match_patch
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
 from sqlmodel import Session, select
@@ -22,7 +22,7 @@ router = APIRouter()
 
 
 @router.get('/documents')
-async def get_documents(keyword: str | None = None, limit: int | None = None, offset: int = 0, current_user: WikiUser = Depends(get_current_user)):
+async def get_documents(keyword: str | None = None, limit: int | None = Query(default=None, ge=0), offset: int = Query(default=0, ge=0), current_user: WikiUser = Depends(get_current_user)):
     """문서 목록을 조회한다. (인증 불필요)
 
     Args:
@@ -560,7 +560,7 @@ async def delete_document(title: str, current_user: WikiUser = Depends(get_curre
         return {'message': f'The document named {title} has been deleted.'}
 
 @router.get('/search')
-async def search_documents(keyword: str, search_type: str = 'title', limit: int | None = None, offset: int = 0, current_user: WikiUser = Depends(get_current_user)):
+async def search_documents(keyword: str, search_type: str = 'title', limit: int | None = Query(default=None, ge=0), offset: int = Query(default=0, ge=0), current_user: WikiUser = Depends(get_current_user)):
     """문서를 검색한다. (인증 불필요)
 
     Args:

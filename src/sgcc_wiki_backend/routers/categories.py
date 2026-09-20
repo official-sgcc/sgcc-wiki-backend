@@ -1,6 +1,6 @@
 """카테고리 트리 CRUD와 카테고리별 문서 조회 엔드포인트."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlmodel import Session, select
 from sgcc_wiki_backend.core.config import logger
@@ -118,7 +118,7 @@ async def get_category(name: str, current_user: WikiUser = Depends(get_current_u
         return build_category_node(name, all_cats, cat_map, current_user)
 
 @router.get('/categories/{name}/documents')
-async def get_documents_by_category(name: str, recursive: bool = False, limit: int | None = None, offset: int = 0, current_user: WikiUser = Depends(get_current_user)):
+async def get_documents_by_category(name: str, recursive: bool = False, limit: int | None = Query(default=None, ge=0), offset: int = Query(default=0, ge=0), current_user: WikiUser = Depends(get_current_user)):
     """해당 카테고리에 속한 문서를 조회한다. 비공개 문서는 관리자에게만 표시한다.
 
     문서의 category(JSON)의 name이 대상과 일치하는 문서를 반환한다. 기본은 지정한
