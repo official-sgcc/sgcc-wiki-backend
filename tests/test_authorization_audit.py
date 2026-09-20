@@ -5,7 +5,7 @@ def test_admin_cannot_change_own_role_via_api(client, admin_headers):
     headers, username = admin_headers
     response = client.put(f'/admin/users/{username}/permission', json={'permission': 'login_user'}, headers=headers)
     assert response.status_code == 403
-    assert client.get('/permissions', headers=headers).json()['actions']['admin'] is True
+    assert client.get('/permissions', headers=headers).json() == {'is_admin': True}
 
 
 def test_security_state_is_private_and_profiles_cannot_be_changed_by_others(client, auth_headers, admin_headers):
@@ -38,7 +38,7 @@ def test_demotion_takes_effect_with_existing_access_token(client, auth_headers, 
     assert client.get('/admin/users', headers=headers).status_code == 200
     assert client.put(f'/admin/users/{username}/permission', json={'permission': 'login_user'}, headers=admin).status_code == 200
     assert client.get('/admin/users', headers=headers).status_code == 403
-    assert client.get('/permissions', headers=headers).json()['actions']['admin'] is False
+    assert client.get('/permissions', headers=headers).json() == {'is_admin': False}
 
 
 def test_verified_registration_is_bound_to_starting_browser(client):

@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 from sgcc_wiki_backend.core.config import logger
 from sgcc_wiki_backend.core.database import engine
 from sgcc_wiki_backend.core.deps import get_current_user
-from sgcc_wiki_backend.core.permissions import Action, require_action, can_write_category, effective_category_role, role_rank, Role
+from sgcc_wiki_backend.core.permissions import Action, require_action, can_write_category, effective_category_role, role_rank, Role, is_admin
 from sgcc_wiki_backend.schemas.categories import WikiCategory, WikiCategoryCreate, WikiCategoryNode, WikiCategoryUpdate
 from sgcc_wiki_backend.schemas.wiki_doc import WikiDoc
 from sgcc_wiki_backend.schemas.wiki_user import WikiUser
@@ -26,6 +26,9 @@ def build_category_node(cat_name, all_cats, cat_map, current_user=None):
     """
     cat = cat_map[cat_name]
     children = [build_category_node(c.name, all_cats, cat_map, current_user) for c in all_cats if c.parent == cat_name]
+    if not is_admin(current_user):
+        return {'name': cat.name, 'parent': cat.parent,
+            'can_write': can_write_category(current_user, cat, cat_map.get), 'children': children}
     return WikiCategoryNode(name=cat.name, parent=cat.parent, write_permission=cat.write_permission,
         can_write=can_write_category(current_user, cat, cat_map.get), children=children,
         effective_write_permission=effective_category_role(cat, cat_map.get),

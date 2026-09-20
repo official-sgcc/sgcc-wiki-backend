@@ -61,9 +61,9 @@ def seed(client, club_headers, admin_headers):
 def test_document_capabilities_match_enforcement_and_rename_preserves_data(client, club_headers, auth_headers, admin_headers):
     club, admin, username = seed(client, club_headers, admin_headers)
     regular, _ = auth_headers('regularpolicy')
-    assert client.get('/permissions', headers=club).json()['actions']['admin'] is False
-    assert client.get('/permissions', headers=club).json()['category_permissions']['General'] is True
-    assert client.get('/permissions', headers=regular).json()['category_permissions']['General'] is False
+    assert client.get('/permissions', headers=club).json() == {'is_admin': False}
+    assert client.get('/categories/General', headers=club).json()['can_write'] is True
+    assert client.get('/categories/General', headers=regular).json()['can_write'] is False
     caps = client.get('/documents/by-title/permissions', params={'title': 'Old/Title'}, headers=club).json()
     assert caps == {'document_update': True, 'document_rename': True, 'document_move': False, 'document_delete': True}
     assert not any(client.get('/documents/by-title/permissions', params={'title': 'Old/Title'}, headers=regular).json().values())
@@ -106,7 +106,7 @@ def test_document_lists_combine_with_category_and_admin_bypass(client, club_head
 def test_category_restriction_blocks_rename_and_missing_auth_denies(client, club_headers, admin_headers):
     club, admin, _ = seed(client, club_headers, admin_headers)
     assert client.put('/categories/General', json={'write_permission': 'admin'}, headers=admin).status_code == 200
-    assert client.get('/permissions', headers=club).json()['category_permissions']['General'] is False
+    assert client.get('/categories/General', headers=club).json()['can_write'] is False
     for headers in (club, {}):
         caps = client.get('/documents/by-title/permissions', params={'title': 'Old/Title'}, headers=headers).json()
         assert caps['document_rename'] is False

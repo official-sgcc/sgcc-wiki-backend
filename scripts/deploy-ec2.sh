@@ -5,7 +5,8 @@ repo=/home/ubuntu/sgcc-wiki-backend
 prep="$repo/.uv-prep"
 uv="$prep/bin/uv"
 revision="$(git -C "$repo" rev-parse HEAD)"
-environment="$prep/releases/$revision/venv"
+release_dir="$prep/releases/$revision"
+environment="$release_dir/venv"
 override=/etc/systemd/system/sgcc-wiki.service.d/uv-runtime.conf
 previous="$prep/previous-uv-runtime.conf"
 had_override=0
@@ -29,7 +30,7 @@ rollback() {
 }
 trap rollback ERR
 
-mkdir -p "$prep/bin" "$prep/cache" "$prep/releases/$revision"
+mkdir -p "$prep/bin" "$prep/cache" "$release_dir/dist"
 if [ ! -x "$uv" ]; then
   curl --proto '=https' --tlsv1.2 -LsSf https://astral.sh/uv/0.12.17/install.sh |
     env UV_UNMANAGED_INSTALL="$prep/bin" sh
@@ -40,8 +41,18 @@ cd "$repo"
 UV_CACHE_DIR="$prep/cache" \
 UV_PROJECT_ENVIRONMENT="$environment" \
 UV_PYTHON_DOWNLOADS=never \
-  "$uv" sync --locked --no-dev --no-editable --python "$repo/.venv/bin/python"
+  "$uv" sync --locked --no-dev --no-install-project --python "$repo/.venv/bin/python"
+UV_CACHE_DIR="$prep/cache" UV_PYTHON_DOWNLOADS=never \
+  "$uv" build --wheel --out-dir "$release_dir/dist" --python "$repo/.venv/bin/python"
+wheels=("$release_dir"/dist/*.whl)
+test "${#wheels[@]}" -eq 1
+UV_CACHE_DIR="$prep/cache" UV_PYTHON_DOWNLOADS=never \
+  "$uv" pip install --python "$environment/bin/python" --no-deps "${wheels[0]}"
 test -x "$environment/bin/uvicorn"
+
+# Validate the installed wheel before switching the service.
+installed_documents="$("$environment/bin/python" -c 'import sgcc_wiki_backend.routers.documents as documents; print(documents.__file__)')"
+cmp "$repo/src/sgcc_wiki_backend/routers/documents.py" "$installed_documents"
 
 if sudo test -f "$override"; then
   sudo cat "$override" > "$previous"
@@ -57,6 +68,9 @@ sudo systemctl is-active --quiet sgcc-wiki
 
 for attempt in {1..10}; do
   if curl --silent --show-error --fail --max-time 5 http://127.0.0.1:8000/healthz >/dev/null; then
+    if ! "$environment/bin/python" -c 'import json, urllib.request; paths = json.load(urllib.request.urlopen("http://127.0.0.1:8000/openapi.json", timeout=5))["paths"]; assert "/documents/by-title/likes" in paths'; then
+      break
+    fi
     trap - ERR
     echo "Backend deployment healthy at $revision"
     exit 0

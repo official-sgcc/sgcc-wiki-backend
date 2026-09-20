@@ -9,8 +9,7 @@ from sgcc_wiki_backend.core.config import FRONTEND_URL, RESERVED_USERNAMES, limi
 from sgcc_wiki_backend.core.database import engine
 from datetime import datetime
 from sgcc_wiki_backend.core.deps import get_current_user
-from sgcc_wiki_backend.core.permissions import Action, Role, require_action, permission_context, can_write_category, is_admin
-from sgcc_wiki_backend.schemas.categories import WikiCategory
+from sgcc_wiki_backend.core.permissions import Action, Role, require_action, permission_context, is_admin
 from sgcc_wiki_backend.core.login_utils import (
     hash_password, verify_password, create_jwt_token,
     validate_username, validate_password, validate_email,
@@ -62,14 +61,8 @@ async def logout(request: Request, current_user: WikiUser = Depends(get_current_
 
 @router.get('/permissions')
 async def get_permission_context(current_user: WikiUser = Depends(get_current_user)):
-    """역할 정의와 인증 사용자의 전역 행동 권한을 반환한다."""
-    context = permission_context(current_user)
-    with Session(engine) as session:
-        context['category_permissions'] = {
-            category.name: can_write_category(current_user, category, lambda name: session.get(WikiCategory, name))
-            for category in session.exec(select(WikiCategory)).all()
-        }
-    return context
+    """관리 화면 접근에 필요한 현재 사용자의 결과만 반환한다."""
+    return {'is_admin': is_admin(current_user)}
 
 @router.post('/register/verify-email')
 @limiter.limit('3/minute')
@@ -245,6 +238,7 @@ async def get_user_info(username: str, current_user: WikiUser = Depends(get_curr
             user_data = user.model_dump(include={'username', 'permission', 'nickname', 'bio', 'github_url'})
         else:
             user_data = user.model_dump(include={'username', 'permission', 'nickname', 'bio', 'github_url', 'email', 'email_verified', 'totp_enabled'})
+        user_data['permission_label'] = next((role.label for role in Role if role.value == user.permission), '권한 정보 없음')
         user_data['edit_versions'] = edit_versions
         user_data['edit_events'] = edit_events
         return user_data

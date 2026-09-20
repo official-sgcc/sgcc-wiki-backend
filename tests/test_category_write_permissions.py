@@ -7,7 +7,7 @@ def test_default_rejects_regular_member_and_admin_controls_setting(client, auth_
     club, _ = club_headers('club123')
     admin, _ = admin_headers
     client.post('/categories', json={'name': 'General'}, headers=admin_headers[0])
-    assert client.get('/categories/General').json()['write_permission'] == 'club_member'
+    assert client.get('/categories/General', headers=admin).json()['write_permission'] == 'club_member'
     assert client.post('/documents', json=payload(), headers=regular).status_code == 403
     assert client.put('/categories/General', json={'write_permission': 'login_user'}, headers=regular).status_code == 403
     assert client.put('/categories/General', json={'write_permission': 'unknown'}, headers=admin).status_code == 422
@@ -66,7 +66,7 @@ def test_app_restart_with_existing_documents_and_old_category_schema(client, aut
     app = reload_app()
     with TestClient(app.app) as restarted:
         assert restarted.get('/healthz').status_code == 200
-        categories = restarted.get('/categories').json()
+        categories = restarted.get('/categories', headers=admin).json()
         assert categories[0]['name'] == 'Parent'
         assert categories[0]['children'][0]['write_permission'] == 'club_member'
         detail = restarted.get('/documents/Restricted')
@@ -80,7 +80,7 @@ def test_app_restart_with_existing_documents_and_old_category_schema(client, aut
         assert restarted.put('/categories/General', json={'write_permission': 'admin'}, headers=admin).status_code == 200
     app = reload_app()
     with TestClient(app.app) as restarted_again:
-        assert restarted_again.get('/categories/General').json()['write_permission'] == 'admin'
+        assert restarted_again.get('/categories/General', headers=admin).json()['write_permission'] == 'admin'
         assert restarted_again.get('/documents/Restricted').json()['content'] == 'updated'
 
 
@@ -94,9 +94,9 @@ def test_parent_restriction_applies_to_existing_children(client, club_headers, a
     assert client.put('/documents/Restricted', json={'content': 'blocked'}, headers=club).status_code == 403
     assert client.post('/documents', json=payload('Blocked'), headers=club).status_code == 403
     child = client.get('/categories/General', headers=club).json()
-    assert child['effective_write_permission'] == child['inherited_write_permission'] == 'admin'
+    assert 'effective_write_permission' not in child
     assert child['can_write'] is False
-    assert client.get('/permissions', headers=club).json()['category_permissions']['General'] is False
+    assert client.get('/permissions', headers=club).json() == {'is_admin': False}
     assert client.put('/categories/General', json={'write_permission': 'club_member'}, headers=admin).status_code == 400
     assert client.put('/documents/Restricted', json={'content': 'admin'}, headers=admin).status_code == 200
     assert client.delete('/documents/Restricted', headers=club).status_code == 200
