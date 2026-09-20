@@ -8,6 +8,7 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 from sgcc_wiki_backend.core.config import logger
 from sgcc_wiki_backend.core.database import engine
+from sgcc_wiki_backend.core.document_lists import with_like_counts
 from sgcc_wiki_backend.core.deps import check_category_write_permission, check_document_permission, check_document_read_permission, get_current_user, validate_tags_and_category
 from sgcc_wiki_backend.schemas.permissions import Permissions
 from sgcc_wiki_backend.schemas.wiki_doc import WikiDocMove, WikiDoc, WikiDocCreate, WikiDocUpdate, WikiDocVersion
@@ -45,7 +46,7 @@ async def get_documents(keyword: str | None = None, limit: int | None = None, of
             statement = statement.where(WikiDoc.is_private == False)
         if limit is not None:
             statement = statement.offset(offset).limit(limit)
-        return session.exec(statement).all()
+        return with_like_counts(session, session.exec(statement).all())
 
 
 @router.get('/documents/count')
@@ -597,12 +598,12 @@ async def search_documents(keyword: str, search_type: str = 'title', limit: int 
             ]
             if limit is not None:
                 docs = docs[offset:offset + limit]
-            return docs
+            return with_like_counts(session, docs)
         else:
             raise HTTPException(status_code=400, detail='Invalid search type.')
         if limit is not None:
             statement = statement.offset(offset).limit(limit)
-        return session.exec(statement).all()
+        return with_like_counts(session, session.exec(statement).all())
 
 @router.get('/documents/{title}/versions')
 async def get_document_versions(title: str, current_user: WikiUser = Depends(get_current_user)):

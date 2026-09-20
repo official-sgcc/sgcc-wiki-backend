@@ -3,7 +3,7 @@ def private_payload(title='PrivateDoc'):
         'title': title,
         'content': 'secret',
         'category': {'name': 'General'},
-        'tags': [],
+        'tags': [{'name': 'Hidden'}],
         'is_private': True,
     }
 
@@ -29,6 +29,10 @@ def test_private_documents_are_admin_only_across_read_paths(client, auth_headers
     assert client.get('/documents/count', headers=admin).json() == {'count': 1}
     assert client.get('/search', params={'keyword': 'PrivateDoc'}, headers=club).json() == []
     assert client.get('/search', params={'keyword': 'PrivateDoc'}, headers=admin).json()[0]['title'] == 'PrivateDoc'
+    assert client.get('/categories/General/documents', headers=club).json() == []
+    assert client.get('/categories/General/documents', headers=admin).json()[0]['title'] == 'PrivateDoc'
+    assert client.get('/tags/Hidden/documents', headers=club).json() == []
+    assert client.get('/tags/Hidden/documents', headers=admin).json()[0]['title'] == 'PrivateDoc'
 
     for path in ('/documents/PrivateDoc/versions', '/documents/PrivateDoc/versions/1'):
         assert client.get(path, headers=club).status_code == 404

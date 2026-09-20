@@ -4,7 +4,8 @@ def test_document_likes_follow_document_and_are_idempotent(client, club_headers,
     admin, _ = admin_headers
     assert client.post('/categories', json={'name': 'General'}, headers=admin).status_code == 200
     assert client.post('/documents', json={
-        'title': 'Like/Doc', 'content': 'hello', 'category': {'name': 'General'}, 'tags': [],
+        'title': 'Like/Doc', 'content': 'hello', 'category': {'name': 'General'},
+        'tags': [{'name': 'Shared'}],
     }, headers=author).status_code == 200
 
     path = '/documents/by-title/likes'
@@ -15,6 +16,9 @@ def test_document_likes_follow_document_and_are_idempotent(client, club_headers,
     assert client.post(path, params=params, headers=author).json() == {'count': 1, 'liked': True}
     assert client.post(path, params=params, headers=other).json() == {'count': 2, 'liked': True}
     assert client.get(path, params=params).json() == {'count': 2, 'liked': False}
+    for list_path in ('/documents', '/search?keyword=Like',
+                      '/categories/General/documents', '/tags/Shared/documents'):
+        assert client.get(list_path).json()[0]['like_count'] == 2
     assert client.delete(path, params=params, headers=other).json() == {'count': 1, 'liked': False}
 
     assert client.put('/documents/by-title/move', params=params,
