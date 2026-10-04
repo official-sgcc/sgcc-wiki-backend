@@ -11,21 +11,83 @@ override=/etc/systemd/system/sgcc-wiki.service.d/uv-runtime.conf
 previous="$prep/previous-uv-runtime.conf"
 had_override=0
 switched=0
+health_timeout=60
+
+wait_for_health() {
+  local deadline=$((SECONDS + health_timeout))
+
+  while (( SECONDS < deadline )); do
+    if sudo systemctl is-active --quiet sgcc-wiki \
+      && curl --silent --show-error --fail \
+        --connect-timeout 1 --max-time 3 \
+        http://127.0.0.1:8000/healthz >/dev/null; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
+
+service_uses_environment() {
+  sudo systemctl show sgcc-wiki --property=ExecStart --value |
+    grep --fixed-strings --quiet -- "$environment/bin/uvicorn"
+}
+
+openapi_is_healthy() {
+  "$environment/bin/python" -c '
+import json
+import urllib.request
+
+with urllib.request.urlopen("http://127.0.0.1:8000/openapi.json", timeout=3) as response:
+    schema = json.load(response)
+
+assert isinstance(schema.get("paths"), dict)
+assert "/healthz" in schema["paths"]
+'
+}
+
+wait_for_release() {
+  local deadline=$((SECONDS + health_timeout))
+
+  while (( SECONDS < deadline )); do
+    if sudo systemctl is-active --quiet sgcc-wiki \
+      && service_uses_environment \
+      && curl --silent --show-error --fail \
+        --connect-timeout 1 --max-time 3 \
+        http://127.0.0.1:8000/healthz >/dev/null \
+      && openapi_is_healthy; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  return 1
+}
 
 rollback() {
+  local rollback_ok=1
+
   trap - ERR
+  set +e
   if [ "$switched" -eq 1 ]; then
     if [ "$had_override" -eq 1 ]; then
-      sudo cp "$previous" "$override"
+      sudo cp "$previous" "$override" || rollback_ok=0
     else
-      sudo rm -f "$override"
+      sudo rm -f "$override" || rollback_ok=0
     fi
-    sudo systemctl daemon-reload
-    sudo systemctl restart sgcc-wiki
-    sudo systemctl is-active --quiet sgcc-wiki
-    curl --silent --show-error --fail --max-time 5 http://127.0.0.1:8000/healthz >/dev/null
+    sudo systemctl daemon-reload || rollback_ok=0
+    sudo systemctl restart sgcc-wiki || rollback_ok=0
+    wait_for_health || rollback_ok=0
+
+    if [ "$rollback_ok" -eq 1 ]; then
+      echo 'Backend deployment failed; previous service configuration restored.' >&2
+    else
+      echo 'Backend deployment failed and the previous service did not recover.' >&2
+    fi
+  else
+    echo 'Backend deployment failed before the service switch; the active service was not changed.' >&2
   fi
-  echo 'Backend deployment failed; previous service configuration restored.' >&2
   exit 1
 }
 trap rollback ERR
@@ -48,11 +110,21 @@ wheels=("$release_dir"/dist/*.whl)
 test "${#wheels[@]}" -eq 1
 UV_CACHE_DIR="$prep/cache" UV_PYTHON_DOWNLOADS=never \
   "$uv" pip install --python "$environment/bin/python" --no-deps "${wheels[0]}"
+UV_CACHE_DIR="$prep/cache" UV_PYTHON_DOWNLOADS=never \
+  "$uv" pip check --python "$environment/bin/python"
 test -x "$environment/bin/uvicorn"
 
-# Validate the installed wheel before switching the service.
-installed_documents="$("$environment/bin/python" -c 'import sgcc_wiki_backend.routers.documents as documents; print(documents.__file__)')"
-cmp "$repo/src/sgcc_wiki_backend/routers/documents.py" "$installed_documents"
+EXPECTED_ENVIRONMENT="$environment" "$environment/bin/python" -c '
+import importlib.util
+import os
+from pathlib import Path
+
+environment = Path(os.environ["EXPECTED_ENVIRONMENT"]).resolve()
+spec = importlib.util.find_spec("sgcc_wiki_backend")
+assert spec is not None and spec.submodule_search_locations
+package_path = Path(next(iter(spec.submodule_search_locations))).resolve()
+assert package_path.is_relative_to(environment)
+'
 
 if sudo test -f "$override"; then
   sudo cat "$override" > "$previous"
@@ -60,22 +132,15 @@ if sudo test -f "$override"; then
 fi
 sudo mkdir -p /etc/systemd/system/sgcc-wiki.service.d
 switched=1
-printf '[Service]\nExecStart=\nExecStart=%s/bin/uvicorn sgcc_wiki_backend:app --host 127.0.0.1 --port 8000\n' "$environment" |
+printf '[Service]\nWorkingDirectory=%s\nExecStart=\nExecStart=%s/bin/uvicorn sgcc_wiki_backend:app --host 127.0.0.1 --port 8000\n' "$repo" "$environment" |
   sudo tee "$override" >/dev/null
 sudo systemctl daemon-reload
 sudo systemctl restart sgcc-wiki
-sudo systemctl is-active --quiet sgcc-wiki
 
-for attempt in {1..10}; do
-  if curl --silent --show-error --fail --max-time 5 http://127.0.0.1:8000/healthz >/dev/null; then
-    if ! "$environment/bin/python" -c 'import json, urllib.request; paths = json.load(urllib.request.urlopen("http://127.0.0.1:8000/openapi.json", timeout=5))["paths"]; assert "/documents/by-title/likes" in paths'; then
-      break
-    fi
-    trap - ERR
-    echo "Backend deployment healthy at $revision"
-    exit 0
-  fi
-  sleep 1
-done
+if ! wait_for_release; then
+  echo "Backend release $revision did not become healthy within ${health_timeout}s." >&2
+  false
+fi
 
-false
+trap - ERR
+echo "Backend deployment healthy at $revision"

@@ -39,6 +39,54 @@ jobs:
       - name: Run tests
         run: .venv/bin/python -m pytest
 
+  package:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up production Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install uv and locked runtime dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install uv==0.12.17
+          python_path="$(python -c 'import sys; print(sys.executable)')"
+          UV_PROJECT_ENVIRONMENT="$RUNNER_TEMP/backend-package-venv" \
+            uv sync --locked --no-dev --no-install-project --python "$python_path"
+
+      - name: Build and validate wheel
+        shell: bash
+        env:
+          DB_PATH: ${{ runner.temp }}/backend-package.db
+          EMAIL_PROVIDER: log
+          JWT_SECRET_KEY: ci-only-jwt-secret-key-at-least-32-bytes
+        run: |
+          set -euo pipefail
+          runtime="$RUNNER_TEMP/backend-package-venv"
+          dist="$RUNNER_TEMP/backend-dist"
+
+          uv build --wheel --out-dir "$dist"
+          shopt -s nullglob
+          wheels=("$dist"/*.whl)
+          if (( ${#wheels[@]} != 1 )); then
+            echo "Expected exactly one backend wheel, found ${#wheels[@]}." >&2
+            exit 1
+          fi
+
+          uv pip install --python "$runtime/bin/python" --no-deps "${wheels[0]}"
+          uv pip check --python "$runtime/bin/python"
+          cd "$RUNNER_TEMP"
+          "$runtime/bin/python" -c \
+            'from sgcc_wiki_backend import app; schema = app.openapi(); assert schema["info"]["title"] == "SGCC Wiki API"; assert "/healthz" in schema["paths"]'
+
   image:
     needs: test
     runs-on: ubuntu-latest
